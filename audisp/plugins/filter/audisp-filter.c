@@ -87,12 +87,12 @@ struct filter_list {
 	struct filter_rules *tail;
 };
 
-static struct filter_rule *parse_type(char **buf, int lineno);
-static struct filter_rule *parse_pair(char **buf, int lineno);
+static struct filter_rule *parse_type(char **buf, int lineno, char **saveptr);
+static struct filter_rule *parse_pair(char **buf, int lineno, char **saveptr);
 struct filter_parser {
 	const char *filter_str;
 	filter_t filter;
-	struct filter_rule* (*parse)(char **buf, int lineno);
+	struct filter_rule* (*parse)(char **buf, int lineno, char **saveptr);
 } parsers[] = {
 	{ "type", FILTER_TYPE, parse_type },
 	{ "key", FILTER_PAIR, parse_pair },
@@ -293,10 +293,15 @@ static char *get_line(FILE *f, char *buf, unsigned size, int lineno,
 	return NULL;
 }
 
-static void reset_ruleset(struct filter_list *list)
+static void reset_list(struct filter_list *list)
 {
-	list->head = NULL;
-	list->tail = NULL;
+	list->head = list->tail = NULL;
+}
+
+static void reset_rules(struct filter_rules *rules)
+{
+	rules->head = rules->tail = NULL;
+	rules->next = NULL;
 }
 
 
@@ -309,9 +314,9 @@ static filter_operator_t str_to_operator(char *str)
 	return OPERATOR_UNKNOWN;
 }
 
-static struct filter_rule *parse_type(char **buf, int lineno)
+static struct filter_rule *parse_type(char **buf, int lineno, char **saveptr)
 {
-	char *token, *saveptr;
+	char *token;
 	struct filter_rule *rule;
 
 	if ((rule = malloc(sizeof(struct filter_rule))) == NULL)
@@ -320,13 +325,7 @@ static struct filter_rule *parse_type(char **buf, int lineno)
 	rule->filter = FILTER_TYPE;
 	rule->next = NULL;
 
-	token = strtok_r(*buf, " ", &saveptr);
-	if (!token || strcmp(token, "type") != 0) {
-		free(rule);
-		return NULL;
-	}
-
-	token = strtok_r(NULL, " ", &saveptr);
+	token = strtok_r(NULL, " ", saveptr);
 	if (!token) {
 		free(rule);
 		return NULL;
@@ -338,7 +337,7 @@ static struct filter_rule *parse_type(char **buf, int lineno)
 		return NULL;
 	}
 
-	token = strtok_r(NULL, " ", &saveptr);
+	token = strtok_r(NULL, " ", saveptr);
 	if (!token) {
 		free(rule);
 		return NULL;
@@ -350,14 +349,12 @@ static struct filter_rule *parse_type(char **buf, int lineno)
 		return NULL;
 	}
 
-	*buf = saveptr;
-
 	return rule;
 }
 
-static struct filter_rule *parse_pair(char **buf, int lineno)
+static struct filter_rule *parse_pair(char **buf, int lineno, char **saveptr)
 {
-	char *ptr, *saveptr;
+	char *ptr;
 	struct filter_rule *rule;
 	int i = 0;
 
@@ -367,66 +364,45 @@ static struct filter_rule *parse_pair(char **buf, int lineno)
 	rule->filter = FILTER_PAIR;
 	rule->next = NULL;
 
-	printf("1\n");
-	ptr = strtok_r(*buf, " ", &saveptr);
-	if (!ptr)
-		return NULL;
-			printf("2\n");
-	if (strcmp(*buf, "key") != 0) 
-		return NULL;
-
-	printf("3\n");
-	ptr = strtok_r(NULL, " ", &saveptr);
+	ptr = strtok_r(NULL, " ", saveptr);
 	if (!ptr) {
 		printf("Operator is missing on line %d\n", lineno);
 		return NULL;
 	}
 
-	printf("4\n");
 	rule->data.pair.key_operator = str_to_operator(ptr);
 	if (rule->data.pair.key_operator == OPERATOR_UNKNOWN) {
 		printf("Invalid operator on line %d\n", lineno);
 		return NULL;
 	}
 	
-	printf("5\n");
-	ptr = strtok_r(NULL, " ", &saveptr);
+	ptr = strtok_r(NULL, " ", saveptr);
 	if (!ptr) {
 		printf("Key is missing on line %d\n", lineno);
 		return NULL;
 	}
-	printf("6\n");
 	rule->data.pair.key = strdup(ptr);
 
-	*buf = saveptr;
-
-	printf("7\n");
-	if (strncmp(*buf, "value", strlen("value")) == 0) {
-		ptr = strtok_r(NULL, " ", &saveptr);
-		printf("9\n");
-		ptr = strtok_r(NULL, " ", &saveptr);
+	if (strncmp(*saveptr, "value", strlen("value")) == 0) {
+		ptr = strtok_r(NULL, " ", saveptr);
+		ptr = strtok_r(NULL, " ", saveptr);
 		if (!ptr) {
 			printf("Operator is missing on line %d\n", lineno);
 			return NULL;
 		}
-		printf("10\n");
 		rule->data.pair.value_operator = str_to_operator(ptr);
 		if (rule->data.pair.value_operator == OPERATOR_UNKNOWN) {
 			printf("Operator is invalid on line %d\n", lineno);
 			return NULL;
 		}
 		
-			printf("11\n");
-		ptr = strtok_r(NULL, " ", &saveptr);
+		ptr = strtok_r(NULL, " ", saveptr);
 		if (!ptr) {
 			printf("Value is missing on line %d\n", lineno);
 			return NULL;
 		}
 		rule->data.pair.value = strdup(ptr);
-		*buf = saveptr;
-		printf("12\n");
 	}
-	printf("C buf=%s\n", *buf);
 
 	return rule;
 }
@@ -467,7 +443,6 @@ static void append_rules(struct filter_list *list, struct filter_rules *rules) {
 	}
 }
 
-
 static struct filter_parser *find_parser(char *token) {
 	for (int i = 0; parsers[i].filter_str != NULL; i++) {
 		if (strncasecmp(parsers[i].filter_str, token, strlen(parsers[i].filter_str)) == 0) {
@@ -479,19 +454,17 @@ static struct filter_parser *find_parser(char *token) {
 
 static struct filter_rules *parse_line(char *line, int lineno)
 {
-	char *token;
 	struct filter_rules *rules;
 	int line_has_error = 0;
+	char *token, *saveptr;
 
 	if ((rules =  malloc(sizeof(struct filter_rules))) == NULL)
 		return NULL;
-	rules->head = rules->tail = NULL;
-	rules->next = NULL;
+	reset_rules(rules);
 
-	printf("Line start: |%s|\n", line);
-	token = line;
+	token = strtok_r(line, " ", &saveptr);
 	while (token != NULL) {
-		printf("Remaining: |%s|\n", token);
+		printf("token=%s saveptr=%s\n", token, saveptr);
 
 		// Trim leading whitespace
 		while (*token == ' ')
@@ -504,25 +477,24 @@ static struct filter_rules *parse_line(char *line, int lineno)
 		if (token[0] == '#')
 			break;
 
-		printf("token=%d *token=%d\n", token, *token);
 		struct filter_parser *parser;
 		if ((parser = find_parser(token)) == NULL) {
-			printf("Invalid keyword(%s) on line %d", token, lineno);
-			syslog(LOG_ERR, "Invalid keyword(%s) on line %d", token, lineno);
+			printf("Invalid keyword(%s) on token |%d|\n", token, lineno);
+			syslog(LOG_ERR, "Invalid keyword(%s) on token %d", token, lineno);
 			line_has_error = 1;
 			break;
 		}
 
 		struct filter_rule *rule;
 		printf("Found a parser: %s\n", parser->filter_str);
-		if ((rule = parser->parse(&token, lineno)) == NULL) {
+		if ((rule = parser->parse(&token, lineno, &saveptr)) == NULL) {
 			printf("Error: parser returned NULL\n");
 			line_has_error = 1;
 			break;
 		}
-
 		append_rule(rules, rule);
 
+		token = strtok_r(NULL, " ", &saveptr);
 	}
 	printf("Line end\n");
 
@@ -544,7 +516,7 @@ static int load_rules(struct filter_list *list)
 	char buf[1024];
 	FILE *f;
 
-	reset_ruleset(list);
+	reset_list(list);
 	errors = 0;
 
 	/* open the file */
