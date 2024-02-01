@@ -38,37 +38,42 @@
 #include "common.h"
 #include "auparse.h"
 
-typedef enum {
+typedef enum
+{
 	OPERATOR_UNKNOWN,
 	OPERATOR_EQUALS,
 	OPERATOR_NOT_EQUALS
 } filter_operator_t;
 
-typedef struct filter_type {
+typedef struct filter_type
+{
 	char *type;
 	filter_operator_t operator;
 } filter_type_t;
 
-typedef struct filter_pair {
+typedef struct filter_pair
+{
 	char *key;
 	filter_operator_t key_operator;
 	char *value;
 	filter_operator_t value_operator;
 } filter_pair_t;
 
-typedef enum {
+typedef enum
+{
 	FILTER_TYPE, /* e.g. type = "SYSCALL"*/
-	FILTER_PAIR /* e.g. key="uid" value="root" */
+	FILTER_PAIR	 /* e.g. key="uid" value="root" */
 } filter_t;
-
 
 /* Depending on the value of filter, we filter based on:
  *  - audit event type
  *  - audit record pair (key and value)
  */
-struct filter_rule {
+struct filter_rule
+{
 	filter_t filter;
-	union {
+	union
+	{
 		filter_type_t type;
 		filter_pair_t pair;
 	} data;
@@ -76,40 +81,47 @@ struct filter_rule {
 	struct filter_rule *next;
 };
 
-struct filter_rules {
+struct filter_rules
+{
 	struct filter_rule *head;
 	struct filter_rule *tail;
 	struct filter_rules *next;
 };
 
-struct filter_list {
+struct filter_list
+{
 	struct filter_rules *head;
 	struct filter_rules *tail;
 };
 
-static struct filter_rule *parse_type(char **buf, int lineno, char **saveptr);
-static struct filter_rule *parse_pair(char **buf, int lineno, char **saveptr);
-struct filter_parser {
+static struct filter_rule *parse_type(char **buf, int lineno);
+static struct filter_rule *parse_pair(char **buf, int lineno);
+struct filter_parser
+{
 	const char *filter_str;
 	filter_t filter;
-	struct filter_rule* (*parse)(char **buf, int lineno, char **saveptr);
+	struct filter_rule *(*parse)(char **buf, int lineno);
 } parsers[] = {
-	{ "type", FILTER_TYPE, parse_type },
-	{ "key", FILTER_PAIR, parse_pair },
-	{ NULL, -1, NULL }
-};
+	{"type", FILTER_TYPE, parse_type},
+	{"key", FILTER_PAIR, parse_pair},
+	{NULL, -1, NULL}};
 
 static void print_rules(struct filter_rules *rules)
 {
 	struct filter_rule *rule;
-	for (rule = rules->head; rule != NULL; rule = rule->next) {
+	for (rule = rules->head; rule != NULL; rule = rule->next)
+	{
 		printf("\t");
-		if (rule->filter == FILTER_PAIR) {
+		if (rule->filter == FILTER_PAIR)
+		{
 			printf("key %s %d ", rule->data.pair.key, rule->data.pair.key_operator);
-			if (rule->data.pair.value != NULL) {
+			if (rule->data.pair.value != NULL)
+			{
 				printf("value %s %d ", rule->data.pair.value, rule->data.pair.value_operator);
 			}
-		} else if (rule->filter == FILTER_TYPE) {
+		}
+		else if (rule->filter == FILTER_TYPE)
+		{
 			printf("type %s %d", rule->data.type.type, rule->data.type.operator);
 		}
 		printf("\n");
@@ -121,7 +133,8 @@ static void print_list(struct filter_list *list)
 	struct filter_rules *rules;
 	int count = 0;
 
-	for (rules = list->head; rules != NULL; rules = rules->next, count++) {
+	for (rules = list->head; rules != NULL; rules = rules->next, count++)
+	{
 		printf("Rule %d:\n", count);
 		print_rules(rules);
 	}
@@ -130,6 +143,7 @@ static void print_list(struct filter_list *list)
 /* Global Data */
 static volatile int stop = 0;
 static volatile int hup = 0;
+static int pipefd[2];
 static auparse_state_t *au = NULL;
 /* mode:
    0 - allowlist
@@ -194,67 +208,76 @@ static void dump_fields_of_record(auparse_state_t *au)
 	printf("\n");
 }
 
+/* This function shows how to dump a whole record's text */
+static void dump_whole_record(auparse_state_t *au)
+{
+	printf("%s: %s\n", audit_msg_type_to_name(auparse_get_type(au)),
+		   auparse_get_record_text(au));
+	printf("\n");
+}
+
 static void handle_event(auparse_state_t *au,
 						 auparse_cb_event_t cb_event_type, void *user_data)
 {
 	int type, num = 0;
-
 	if (cb_event_type != AUPARSE_CB_EVENT_READY)
 		return;
 
-	printf("SZEVASZ: %d\n", *(int *)user_data);
+	printf("[handle_event] New event\n");
 	auparse_first_record(au);
-	do {
-		printf("[WRITE] %s\n", auparse_get_record_text(au));
-		if (write(*(int *)user_data, auparse_get_record_text(au), MAX_AUDIT_MESSAGE_LENGTH) == -1) {
-			printf("[WRITE] BAj van\n");
-		}
-	} while (auparse_next_record(au) > 0);
-	printf("\n");
-	return;
-
-	/* Loop through the records in the event looking for one to process.
-	   We use physical record number because we may search around and
-	   move the cursor accidentally skipping a record. */
-	printf("New event: cb_event_type=%d\n", cb_event_type);
-	while (auparse_goto_record_num(au, num) > 0)
+	do
 	{
-		printf("Szevaasz:\n");
-		type = auparse_get_type(au);
-		dump_fields_of_record(au);
+		printf("[handle_event] pipefd=%d %s\n", pipefd[1], auparse_get_record_text(au));
 
-		/* Now we can branch based on what record type we find.
-		   This is just a few suggestions, but it could be anything. */
-		switch (type)
+		const char *text = auparse_get_record_text(au);
+		const ssize_t len = strlen(text);
+		char *tmp = malloc(len+2);
+		strcpy(tmp, auparse_get_record_text(au));
+		tmp[len] = '\n';
+		tmp[len + 1] = '\0';
+
+		ssize_t rc;
+		if ((rc = write(pipefd[1], tmp, strlen(tmp))) == -1)
 		{
-		case AUDIT_AVC:
-			// dump_fields_of_record(au);
-			break;
-		case AUDIT_SYSCALL:
-			// dump_whole_record(au);
-			break;
-		case AUDIT_USER_LOGIN:
-			break;
-		case AUDIT_ANOM_ABEND:
-			break;
-		case AUDIT_MAC_STATUS:
-			// dump_whole_event(au);a
-			break;
-		default:
-			break;
+			printf("[handle_event] write() failed\n");
 		}
-		num++;
-	}
+		printf("[handle_event] write rc=%u\n", rc);
+	} while (auparse_next_record(au) > 0);
+	printf("[handle_event] Event ended\n\n");
+
+	// if (ausearch_add_item(au, "uid", "=", "1001", AUSEARCH_RULE_AND))
+	// {
+	// 	printf("ausearch error\n");
+	// }
+	// else
+	// {
+	// 	if (ausearch_set_stop(au, AUSEARCH_STOP_FIELD))
+	// 	{
+	// 		printf("ausearch_set_stop error - %s\n", strerror(errno));
+	// 	}
+	// 	else
+	// 	{
+	// 		if (ausearch_next_event(au) <= 0)
+	// 			printf("Error searching for auid - %s\n", strerror(errno));
+	// 		else
+	// 			printf("Found %s = %s\n", auparse_get_field_name(au),
+	// 				   auparse_get_field_str(au));
+	// 	}
+	// }
+	// ausearch_clear(au);
+	return;
 }
 
 static int parse_args(int argc, const char *argv[])
 {
-	if (argc <= 3) {
+	if (argc <= 3)
+	{
 		syslog(LOG_ERR, "%s: Not enough arguments", argv[0]);
 		return 1;
 	}
 
-	for (int i = 0; i < argc; i++) {
+	for (int i = 0; i < argc; i++)
+	{
 		printf("arg %d = %s\n", i, argv[i]);
 	}
 
@@ -262,7 +285,8 @@ static int parse_args(int argc, const char *argv[])
 		mode = 0;
 	else if (strcasecmp(argv[1], "blocklist") == 0)
 		mode = 1;
-	else {
+	else
+	{
 		syslog(LOG_ERR, "%s: Invalid mode specified, possible values are: allowlist, blocklist.");
 		return 1;
 	}
@@ -274,15 +298,18 @@ static int parse_args(int argc, const char *argv[])
 }
 
 static char *get_line(FILE *f, char *buf, unsigned size, int lineno,
-	const char *file)
+					  const char *file)
 {
 	int too_long = 0;
 
-	while (fgets_unlocked(buf, size, f)) {
-		 /* remove newline */
+	while (fgets_unlocked(buf, size, f))
+	{
+		/* remove newline */
 		char *ptr = strchr(buf, 0x0a);
-		if (ptr) {
-			if (!too_long) {
+		if (ptr)
+		{
+			if (!too_long)
+			{
 				*ptr = 0;
 				return buf;
 			}
@@ -304,7 +331,6 @@ static void reset_rules(struct filter_rules *rules)
 	rules->next = NULL;
 }
 
-
 static filter_operator_t str_to_operator(char *str)
 {
 	if (strcmp(str, "=") == 0)
@@ -314,7 +340,7 @@ static filter_operator_t str_to_operator(char *str)
 	return OPERATOR_UNKNOWN;
 }
 
-static struct filter_rule *parse_type(char **buf, int lineno, char **saveptr)
+static struct filter_rule *parse_type(char **buf, int lineno)
 {
 	char *token;
 	struct filter_rule *rule;
@@ -325,26 +351,30 @@ static struct filter_rule *parse_type(char **buf, int lineno, char **saveptr)
 	rule->filter = FILTER_TYPE;
 	rule->next = NULL;
 
-	token = strtok_r(NULL, " ", saveptr);
-	if (!token) {
+	token = strtok_r(NULL, " ", buf);
+	if (!token)
+	{
 		free(rule);
 		return NULL;
 	}
 
-	rule->data.type.operator = str_to_operator(token);
-	if (rule->data.type.operator == OPERATOR_UNKNOWN) {
+	rule->data.type.operator= str_to_operator(token);
+	if (rule->data.type.operator== OPERATOR_UNKNOWN)
+	{
 		free(rule);
 		return NULL;
 	}
 
-	token = strtok_r(NULL, " ", saveptr);
-	if (!token) {
+	token = strtok_r(NULL, " ", buf);
+	if (!token)
+	{
 		free(rule);
 		return NULL;
 	}
 
 	rule->data.type.type = strdup(token);
-	if (!rule->data.type.type) {
+	if (!rule->data.type.type)
+	{
 		free(rule);
 		return NULL;
 	}
@@ -352,7 +382,7 @@ static struct filter_rule *parse_type(char **buf, int lineno, char **saveptr)
 	return rule;
 }
 
-static struct filter_rule *parse_pair(char **buf, int lineno, char **saveptr)
+static struct filter_rule *parse_pair(char **buf, int lineno)
 {
 	char *ptr;
 	struct filter_rule *rule;
@@ -364,40 +394,47 @@ static struct filter_rule *parse_pair(char **buf, int lineno, char **saveptr)
 	rule->filter = FILTER_PAIR;
 	rule->next = NULL;
 
-	ptr = strtok_r(NULL, " ", saveptr);
-	if (!ptr) {
+	ptr = strtok_r(NULL, " ", buf);
+	if (!ptr)
+	{
 		printf("Operator is missing on line %d\n", lineno);
 		return NULL;
 	}
 
 	rule->data.pair.key_operator = str_to_operator(ptr);
-	if (rule->data.pair.key_operator == OPERATOR_UNKNOWN) {
+	if (rule->data.pair.key_operator == OPERATOR_UNKNOWN)
+	{
 		printf("Invalid operator on line %d\n", lineno);
 		return NULL;
 	}
-	
-	ptr = strtok_r(NULL, " ", saveptr);
-	if (!ptr) {
+
+	ptr = strtok_r(NULL, " ", buf);
+	if (!ptr)
+	{
 		printf("Key is missing on line %d\n", lineno);
 		return NULL;
 	}
 	rule->data.pair.key = strdup(ptr);
 
-	if (strncmp(*saveptr, "value", strlen("value")) == 0) {
-		ptr = strtok_r(NULL, " ", saveptr);
-		ptr = strtok_r(NULL, " ", saveptr);
-		if (!ptr) {
+	if (strncmp(*buf, "value", strlen("value")) == 0)
+	{
+		ptr = strtok_r(NULL, " ", buf);
+		ptr = strtok_r(NULL, " ", buf);
+		if (!ptr)
+		{
 			printf("Operator is missing on line %d\n", lineno);
 			return NULL;
 		}
 		rule->data.pair.value_operator = str_to_operator(ptr);
-		if (rule->data.pair.value_operator == OPERATOR_UNKNOWN) {
+		if (rule->data.pair.value_operator == OPERATOR_UNKNOWN)
+		{
 			printf("Operator is invalid on line %d\n", lineno);
 			return NULL;
 		}
-		
-		ptr = strtok_r(NULL, " ", saveptr);
-		if (!ptr) {
+
+		ptr = strtok_r(NULL, " ", buf);
+		if (!ptr)
+		{
 			printf("Value is missing on line %d\n", lineno);
 			return NULL;
 		}
@@ -410,14 +447,17 @@ static struct filter_rule *parse_pair(char **buf, int lineno, char **saveptr)
 static void free_filter_rules(struct filter_rules *rules)
 {
 	struct filter_rule *current = rules->head, *to_delete;
-	while (current != NULL) {
+	while (current != NULL)
+	{
 		to_delete = current;
 		current = current->next;
-		// free_filter(to_delete);
-		if (to_delete->filter == FILTER_TYPE) {
+		if (to_delete->filter == FILTER_TYPE)
+		{
 			free(to_delete->data.pair.key);
 			free(to_delete->data.pair.value);
-		} else if (to_delete->filter == FILTER_PAIR) {
+		}
+		else if (to_delete->filter == FILTER_PAIR)
+		{
 			free(to_delete->data.type.type);
 		}
 
@@ -425,27 +465,50 @@ static void free_filter_rules(struct filter_rules *rules)
 	}
 }
 
-static void append_rule(struct filter_rules *rules, struct filter_rule *rule) {
-	if (rules->head == NULL) {
+static void free_filter_list(struct filter_list *list)
+{
+	struct filter_rules *current = list->head, *to_delete;
+	while (current != NULL)
+	{
+		to_delete = current;
+		current = current->next;
+		free_filter_rules(to_delete);
+		free(to_delete);
+	}
+}
+
+static void append_rule(struct filter_rules *rules, struct filter_rule *rule)
+{
+	if (rules->head == NULL)
+	{
 		rules->head = rules->tail = rule;
-	} else {
+	}
+	else
+	{
 		rules->tail->next = rule;
 		rules->tail = rule;
 	}
 }
 
-static void append_rules(struct filter_list *list, struct filter_rules *rules) {
-	if (list->head == NULL) {
+static void append_rules(struct filter_list *list, struct filter_rules *rules)
+{
+	if (list->head == NULL)
+	{
 		list->head = list->tail = rules;
-	} else {
+	}
+	else
+	{
 		list->tail->next = rules;
 		list->tail = rules;
 	}
 }
 
-static struct filter_parser *find_parser(char *token) {
-	for (int i = 0; parsers[i].filter_str != NULL; i++) {
-		if (strncasecmp(parsers[i].filter_str, token, strlen(parsers[i].filter_str)) == 0) {
+static struct filter_parser *find_parser(char *token)
+{
+	for (int i = 0; parsers[i].filter_str != NULL; i++)
+	{
+		if (strncasecmp(parsers[i].filter_str, token, strlen(parsers[i].filter_str)) == 0)
+		{
 			return &parsers[i];
 		}
 	}
@@ -458,12 +521,13 @@ static struct filter_rules *parse_line(char *line, int lineno)
 	int line_has_error = 0;
 	char *token, *saveptr;
 
-	if ((rules =  malloc(sizeof(struct filter_rules))) == NULL)
+	if ((rules = malloc(sizeof(struct filter_rules))) == NULL)
 		return NULL;
 	reset_rules(rules);
 
 	token = strtok_r(line, " ", &saveptr);
-	while (token != NULL) {
+	while (token != NULL)
+	{
 		printf("token=%s saveptr=%s\n", token, saveptr);
 
 		// Trim leading whitespace
@@ -478,17 +542,16 @@ static struct filter_rules *parse_line(char *line, int lineno)
 			break;
 
 		struct filter_parser *parser;
-		if ((parser = find_parser(token)) == NULL) {
-			printf("Invalid keyword(%s) on token |%d|\n", token, lineno);
+		if ((parser = find_parser(token)) == NULL)
+		{
 			syslog(LOG_ERR, "Invalid keyword(%s) on token %d", token, lineno);
 			line_has_error = 1;
 			break;
 		}
 
 		struct filter_rule *rule;
-		printf("Found a parser: %s\n", parser->filter_str);
-		if ((rule = parser->parse(&token, lineno, &saveptr)) == NULL) {
-			printf("Error: parser returned NULL\n");
+		if ((rule = parser->parse(&saveptr, lineno)) == NULL)
+		{
 			line_has_error = 1;
 			break;
 		}
@@ -496,11 +559,11 @@ static struct filter_rules *parse_line(char *line, int lineno)
 
 		token = strtok_r(NULL, " ", &saveptr);
 	}
-	printf("Line end\n");
 
 	errors += line_has_error;
 
-	if (line_has_error) {
+	if (line_has_error)
+	{
 		free_filter_rules(rules);
 		free(rules);
 		rules = NULL;
@@ -520,52 +583,60 @@ static int load_rules(struct filter_list *list)
 	errors = 0;
 
 	/* open the file */
-	if ((fd = open(config_file, O_RDONLY)) < 0) {
-		if (errno != ENOENT) {
+	if ((fd = open(config_file, O_RDONLY)) < 0)
+	{
+		if (errno != ENOENT)
+		{
 			syslog(LOG_ERR, "Error opening config file (%s)",
-				strerror(errno));
+				   strerror(errno));
 			return 1;
 		}
 		syslog(LOG_WARNING,
-			"Config file %s doesn't exist, skipping", config_file);
+			   "Config file %s doesn't exist, skipping", config_file);
 		return 0;
 	}
 
-	if (fstat(fd, &st) < 0) {
+	if (fstat(fd, &st) < 0)
+	{
 		syslog(LOG_ERR, "Error fstat'ing config file (%s)",
-			strerror(errno));
+			   strerror(errno));
 		close(fd);
 		return 1;
 	}
-	if (st.st_uid != 0) {
+	if (st.st_uid != 0)
+	{
 		syslog(LOG_ERR, "Error - %s isn't owned by root",
-			config_file);
+			   config_file);
 		close(fd);
 		return 1;
 	}
-	if ((st.st_mode & S_IWOTH) == S_IWOTH) {
+	if ((st.st_mode & S_IWOTH) == S_IWOTH)
+	{
 		syslog(LOG_ERR, "Error - %s is world writable",
-			config_file);
+			   config_file);
 		close(fd);
 		return 1;
 	}
-	if (!S_ISREG(st.st_mode)) {
+	if (!S_ISREG(st.st_mode))
+	{
 		syslog(LOG_ERR, "Error - %s is not a regular file",
-			config_file);
+			   config_file);
 		close(fd);
 		return 1;
 	}
 
 	/* it's ok, read line by line */
 	f = fdopen(fd, "rm");
-	if (f == NULL) {
+	if (f == NULL)
+	{
 		syslog(LOG_ERR, "Error - fdopen failed (%s)",
-			strerror(errno));
+			   strerror(errno));
 		close(fd);
 		return 1;
 	}
 
-	while (get_line(f, buf, sizeof(buf), lineno, config_file)) {
+	while (get_line(f, buf, sizeof(buf), lineno, config_file))
+	{
 		lineno++;
 
 		struct filter_rules *rules;
@@ -585,7 +656,6 @@ int main(int argc, const char *argv[])
 {
 	struct sigaction sa;
 	char tmp[MAX_AUDIT_MESSAGE_LENGTH];
-	int pipefd[2];
 	pid_t cpid;
 
 	printf("parse_args()\n");
@@ -594,10 +664,13 @@ int main(int argc, const char *argv[])
 
 	printf("load_rules()\n");
 	if (load_rules(&list))
+	{
+		free_filter_list(&list);
 		return 1;
+	}
 
-	printf("end\n");
-	return 0;
+	// printf("end\n");
+	// return 0;
 
 	/* Register sighandlers */
 	sa.sa_flags = 0;
@@ -615,23 +688,33 @@ int main(int argc, const char *argv[])
 		syslog(LOG_WARNING, "%s plugin was unable to drop capabilities, continuing with elevated privileges", argv[0]);
 #endif
 
-	if (pipe(pipefd) == -1) {
+	if (pipe(pipefd) == -1)
+	{
 		syslog(LOG_ERR, "%s is exiting due to not being able to open a pipe\n", argv[0]);
 		return -1;
 	}
 
 	cpid = fork();
-	if (cpid == -1) {
+	if (cpid == -1)
+	{
 		syslog(LOG_ERR, "%s is exiting due to fork() error\n", argv[0]);
 		return -1;
 	}
 
-	if (cpid == 0) { // Child reads filtered input
+	if (cpid == 0)
+	{ // Child reads filtered input
 
 		close(pipefd[1]);
-		execve("/usr/local/sbin/audisp-syslog", NULL, NULL);
+		dup2(pipefd[0], STDIN_FILENO);
+		close(pipefd[0]);
+
+		char *args[] = {"/usr/local/sbin/audisp-syslog", NULL};
+		execve("/usr/local/sbin/audisp-syslog", args, NULL);
+		printf("HAJJJ\n");
 		syslog(LOG_ERR, "%s execve errored\n", argv[0]);
-	} else {
+	}
+	else
+	{
 		// Parent forwards data after filters have been applied
 		close(pipefd[0]);
 
@@ -644,7 +727,7 @@ int main(int argc, const char *argv[])
 
 		auparse_set_eoe_timeout(2);
 		printf("pipefd[0]=%d pipefd[1]=%d\n", pipefd[0], pipefd[1]);
-		auparse_add_callback(au, handle_event, (void *)&pipefd[1], NULL);
+		auparse_add_callback(au, handle_event, NULL, NULL);
 
 		do
 		{
@@ -682,7 +765,7 @@ int main(int argc, const char *argv[])
 			if (!stop && !hup && retval > 0)
 			{
 				while ((read_size = read(0, tmp,
-										MAX_AUDIT_MESSAGE_LENGTH)) > 0)
+										 MAX_AUDIT_MESSAGE_LENGTH)) > 0)
 				{
 					auparse_feed(au, tmp, read_size);
 				}
@@ -693,6 +776,7 @@ int main(int argc, const char *argv[])
 
 		auparse_flush_feed(au);
 		auparse_destroy(au);
+		waitpid(cpid, NULL, 0);
 	}
 
 	return 0;
