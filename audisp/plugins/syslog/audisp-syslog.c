@@ -45,17 +45,17 @@ static int interpret = 0;
 /*
  * SIGTERM handler
  */
-static void term_handler( int sig )
+static void term_handler(int sig)
 {
-        stop = 1;
+	stop = 1;
 }
 
 /*
  * SIGHUP handler: re-read config
  */
-static void hup_handler( int sig )
+static void hup_handler(int sig)
 {
-        hup = 1;
+	hup = 1;
 }
 
 static void reload_config(void)
@@ -68,8 +68,10 @@ static int init_syslog(int argc, const char *argv[])
 	int i, facility = LOG_USER;
 	priority = LOG_INFO;
 
-	for (i = 1; i < argc; i++) {
-		if (argv[i]) {
+	for (i = 1; i < argc; i++)
+	{
+		if (argv[i])
+		{
 			if (strcasecmp(argv[i], "LOG_DEBUG") == 0)
 				priority = LOG_DEBUG;
 			else if (strcasecmp(argv[i], "LOG_INFO") == 0)
@@ -114,17 +116,18 @@ static int init_syslog(int argc, const char *argv[])
 				facility = LOG_USER;
 			else if (strcasecmp(argv[i], "interpret") == 0)
 				interpret = 1;
-			else {
+			else
+			{
 				syslog(LOG_ERR,
-					"Unknown log priority/facility %s",
-					argv[i]);
+					   "Unknown log priority/facility %s",
+					   argv[i]);
 				return 1;
 			}
 		}
 	}
 	syslog(LOG_INFO,
-		"syslog plugin initialized with facility %d and priority %d",
-		facility, priority);
+		   "syslog plugin initialized with facility %d and priority %d",
+		   facility, priority);
 	if (facility != LOG_USER)
 		openlog("audispd", 0, facility);
 	return 0;
@@ -133,7 +136,8 @@ static int init_syslog(int argc, const char *argv[])
 static char *record = NULL;
 static inline void write_syslog(char *s)
 {
-	if (interpret) {
+	if (interpret)
+	{
 		int rc, header = 0;
 		char *mptr, tbuf[64];
 
@@ -149,7 +153,8 @@ static inline void write_syslog(char *s)
 		rc = auparse_first_record(au);
 
 		// AUDIT_EOE has no fields - drop it
-		if (auparse_get_num_fields(au) == 0) {
+		if (auparse_get_num_fields(au) == 0)
+		{
 			auparse_destroy(au);
 			return;
 		}
@@ -157,24 +162,26 @@ static inline void write_syslog(char *s)
 		// Now iterate over the fields and print each one
 		mptr = record;
 		while (rc > 0 &&
-		       ((mptr-record) < (MAX_AUDIT_MESSAGE_LENGTH-128))) {
+			   ((mptr - record) < (MAX_AUDIT_MESSAGE_LENGTH - 128)))
+		{
 			int ftype = auparse_get_field_type(au);
 			const char *fname = auparse_get_field_name(au);
 			const char *fval;
-			switch (ftype) {
-				case AUPARSE_TYPE_ESCAPED_FILE:
-					fval = auparse_interpret_realpath(au);
-					break;
-				case AUPARSE_TYPE_SOCKADDR:
+			switch (ftype)
+			{
+			case AUPARSE_TYPE_ESCAPED_FILE:
+				fval = auparse_interpret_realpath(au);
+				break;
+			case AUPARSE_TYPE_SOCKADDR:
+				fval =
+					auparse_interpret_sock_address(au);
+				if (fval == NULL)
 					fval =
-					    auparse_interpret_sock_address(au);
-					if (fval == NULL)
-					    fval =
-					      auparse_interpret_sock_family(au);
-					break;
-				default:
-					fval = auparse_interpret_field(au);
-					break;
+						auparse_interpret_sock_family(au);
+				break;
+			default:
+				fval = auparse_interpret_field(au);
+				break;
 			}
 
 			mptr = stpcpy(mptr, fname ? fname : "?");
@@ -182,14 +189,15 @@ static inline void write_syslog(char *s)
 			mptr = stpcpy(mptr, fval ? fval : "?");
 			mptr = stpcpy(mptr, " ");
 			rc = auparse_next_field(au);
-			if (!header && fname && strcmp(fname, "type") == 0) {
+			if (!header && fname && strcmp(fname, "type") == 0)
+			{
 				mptr = stpcpy(mptr, "msg=audit(");
 
 				time_t t = auparse_get_time(au);
 				struct tm *tv = localtime(&t);
 				if (tv)
 					strftime(tbuf, sizeof(tbuf),
-								"%x %T", tv);
+							 "%x %T", tv);
 				else
 					strcpy(tbuf, "?");
 				mptr = stpcpy(mptr, tbuf);
@@ -200,7 +208,9 @@ static inline void write_syslog(char *s)
 		// Record is complete, dump it to syslog
 		syslog(priority, "%s", record);
 		auparse_destroy(au);
-	} else {
+	}
+	else
+	{
 		char *c = strchr(s, AUDIT_INTERP_SEPARATOR);
 		if (c)
 			*c = ' ';
@@ -210,7 +220,16 @@ static inline void write_syslog(char *s)
 
 int main(int argc, const char *argv[])
 {
-	char tmp[MAX_AUDIT_MESSAGE_LENGTH+1];
+
+	char tmp[MAX_AUDIT_MESSAGE_LENGTH + 1];
+	// printf("Started reading\n");
+	// while (fgets(tmp, sizeof(tmp), stdin) != NULL)
+	// {
+	// 	printf("EX[SYSLOG plugin] %s\n", tmp);
+	// 	// Process the data as needed
+	// }
+	// printf("Finished reading\n");
+
 	struct sigaction sa;
 
 	if (init_syslog(argc, argv))
@@ -228,37 +247,48 @@ int main(int argc, const char *argv[])
 #ifdef HAVE_LIBCAP_NG
 	// Drop capabilities
 	capng_clear(CAPNG_SELECT_BOTH);
-        if (capng_apply(CAPNG_SELECT_BOTH))
+	if (capng_apply(CAPNG_SELECT_BOTH))
 		syslog(LOG_WARNING, "audisp-syslog plugin was unable to drop capabilities, continuing with elevated priviles");
 #endif
 
-	do {
+	do
+	{
 		fd_set read_mask;
 		int retval = -1;
 
 		/* Load configuration */
-		if (hup) {
+		if (hup)
+		{
 			reload_config();
 		}
-		do {
+		do
+		{
 			FD_ZERO(&read_mask);
 			FD_SET(0, &read_mask);
-			retval= select(1, &read_mask, NULL, NULL, NULL);
+			retval = select(1, &read_mask, NULL, NULL, NULL);
 		} while (retval == -1 && errno == EINTR && !hup && !stop);
 
 		/* Now the event loop */
-		 if (!stop && !hup && retval > 0) {
-			if (FD_ISSET(0, &read_mask)) {
-				do {
-					if (audit_fgets(tmp,
-					    MAX_AUDIT_MESSAGE_LENGTH, 0) > 0) {
+		if (!stop && !hup && retval > 0)
+		{
+			if (FD_ISSET(0, &read_mask))
+			{
+				do
+				{
+					ssize_t rc;
+					if ((rc = audit_fgets(tmp,
+									MAX_AUDIT_MESSAGE_LENGTH, 0)) > 0)
+					{
 						printf("[SYSLOG plugin] %s\n", tmp);
 						write_syslog(tmp);
-
-						}
+						printf("Szevasz 1\n");
+					}
+					printf("Szevasz 2 rc=%u tmp = %s\n", rc, tmp);
 				} while (audit_fgets_more(
-						MAX_AUDIT_MESSAGE_LENGTH));
+					MAX_AUDIT_MESSAGE_LENGTH));
+				printf("Szevasz 3\n");
 			}
+			printf("Szevasz 4\n");
 		}
 		if (audit_fgets_eof())
 			break;
@@ -267,4 +297,3 @@ int main(int argc, const char *argv[])
 	free(record);
 	return 0;
 }
-
