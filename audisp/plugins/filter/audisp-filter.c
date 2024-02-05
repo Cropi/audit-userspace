@@ -140,7 +140,6 @@ static void print_list(struct filter_list *list)
 static volatile int stop = 0;
 static volatile int hup = 0;
 static int pipefd[2];
-static auparse_state_t *au = NULL;
 /* mode:
    0 - allowlist
    1 - blocklist
@@ -247,25 +246,43 @@ static void handle_event(auparse_state_t *au, auparse_cb_event_t cb_event_type, 
 	} while (auparse_next_record(au) > 0);
 	printf("[handle_event] Event ended\n");
 
+	// const char *expr = "type = SYSCALL";
+	// char *error = NULL;
+	// rc = ausearch_add_expression(au, expr, &error, AUSEARCH_RULE_AND);
+	// printf("ausearch_add_expression rc=%d error=%s\n", rc, error);
+
+	// return;
+
 	/* allowlist: found=1, blocklist: found=0 */
-	for (struct filter_rules *rules = list.head; rules != NULL; rules = rules->next) {
-		auparse_first_record(au);
+	for (struct filter_rules *rules = list.head; rules != NULL; rules = rules->next)
+	{
+		rc = auparse_first_record(au);
+		printf("[handle_event] auparse_first_record rc=%d\n", rc);
 		rc = ausearch_set_stop(au, AUSEARCH_STOP_EVENT);
 		printf("[handle_event] ausearch_set_stop rc=%d\n", rc);
+		ausearch_expr(au);
 
 		/* create the ausearch query based on a single config line */
-		for (struct filter_rule *rule = rules->head; rule != NULL; rule = rule->next) {
-			if (rule->filter == FILTER_TYPE) {
+		for (struct filter_rule *rule = rules->head; rule != NULL; rule = rule->next)
+		{
+			printf("[handle_event] will filter by %d\n", rule->filter);
+			if (rule->filter == FILTER_TYPE)
+			{
 				rc = ausearch_add_item(au, "type", rule->data.type.operator, rule->data.type.type, AUSEARCH_RULE_AND);
 				printf("[handle_event] ausearch_add_item type rc=%d\n", rc);
-			} else if (rule->filter == FILTER_PAIR) {
+			}
+			else if (rule->filter == FILTER_PAIR)
+			{
 				char *key, *op, *value;
-				if (rule->data.pair.value != NULL) {
+				if (rule->data.pair.value != NULL)
+				{
 					/* check for key-value pair */
 					key = rule->data.pair.key;
 					op = rule->data.pair.value_operator;
 					value = rule->data.pair.value;
-				} else {
+				}
+				else
+				{
 					/* check for existence of a specific key*/
 					key = rule->data.pair.key;
 					op = "exists";
@@ -276,13 +293,18 @@ static void handle_event(auparse_state_t *au, auparse_cb_event_t cb_event_type, 
 			}
 		}
 
-		/* see if */
 		found = ausearch_next_event(au);
-		printf("[handle_event] ausearch_next_event found=%d\n", found);
-
 		ausearch_clear(au);
+		// auparse_reset(au);
+		printf("[handle_event] ausearch_next_event found=%d\n\n", found);
+		printf("Event after iteration:\n");
+		rc = auparse_first_record(au);
+		printf("[handle_event2] auparse_first_record rc=%d\n", rc);
+		do
+		{
+			printf("[handle_event2] %s\n", auparse_get_record_text(au));
+		} while (auparse_next_record(au) > 0);
 	}
-
 
 	// if (ausearch_add_item(au, "uid", "=", "1001", AUSEARCH_RULE_AND))
 	// {
@@ -388,7 +410,7 @@ static struct filter_rule *parse_type(char **buf, int lineno)
 		return NULL;
 	}
 
-	rule->data.type.operator = strdup(token);
+	rule->data.type.operator= strdup(token);
 
 	token = strtok_r(NULL, " ", buf);
 	if (!token)
@@ -471,13 +493,15 @@ static void free_filter_rules(struct filter_rules *rules)
 	{
 		to_delete = current;
 		current = current->next;
-		if (to_delete->filter == FILTER_TYPE) {
+		if (to_delete->filter == FILTER_TYPE)
+		{
 			free(to_delete->data.pair.key);
 			free(to_delete->data.pair.key_operator);
 			free(to_delete->data.pair.value);
 			free(to_delete->data.pair.value_operator);
 		}
-		else if (to_delete->filter == FILTER_PAIR) {
+		else if (to_delete->filter == FILTER_PAIR)
+		{
 			free(to_delete->data.type.type);
 		}
 
@@ -672,8 +696,9 @@ static int load_rules(struct filter_list *list)
 
 int main(int argc, const char *argv[])
 {
+	auparse_state_t *au = NULL;
 	struct sigaction sa;
-	char tmp[MAX_AUDIT_MESSAGE_LENGTH];
+	char buffer[MAX_AUDIT_MESSAGE_LENGTH];
 	pid_t cpid;
 
 	printf("parse_args()\n");
@@ -718,7 +743,8 @@ int main(int argc, const char *argv[])
 		return -1;
 	}
 
-	if (cpid == 0) {
+	if (cpid == 0)
+	{
 		/* Child reads filtered input*/
 
 		close(pipefd[1]);
@@ -728,7 +754,9 @@ int main(int argc, const char *argv[])
 		char *args[] = {"/usr/local/sbin/audisp-syslog", NULL};
 		execve("/usr/local/sbin/audisp-syslog", args, NULL);
 		syslog(LOG_ERR, "%s execve errored\n", argv[0]);
-	} else {
+	}
+	else
+	{
 		/* Parent reads input and forwards data after filters have been applied */
 		close(pipefd[0]);
 
@@ -748,14 +776,17 @@ int main(int argc, const char *argv[])
 			int read_size = 1; /* Set to 1 so it's not EOF */
 
 			/* Load configuration */
-			if (hup) {
+			if (hup)
+			{
 				reload_config();
 			}
-			do {
+			do
+			{
 				FD_ZERO(&read_mask);
 				FD_SET(0, &read_mask);
 
-				if (auparse_feed_has_data(au)) {
+				if (auparse_feed_has_data(au))
+				{
 					struct timeval tv;
 					tv.tv_sec = 1;
 					tv.tv_usec = 0;
@@ -771,9 +802,11 @@ int main(int argc, const char *argv[])
 			} while (retval == -1 && errno == EINTR && !hup && !stop);
 
 			/* Now the event loop */
-			if (!stop && !hup && retval > 0) {
-				while ((read_size = read(0, tmp, MAX_AUDIT_MESSAGE_LENGTH)) > 0) {
-					auparse_feed(au, tmp, read_size);
+			if (!stop && !hup && retval > 0)
+			{
+				while ((read_size = read(0, buffer, MAX_AUDIT_MESSAGE_LENGTH)) > 0)
+				{
+					auparse_feed(au, buffer, read_size);
 				}
 			}
 			if (read_size == 0) /* EOF */
