@@ -57,11 +57,11 @@ enum {
 };
 
 struct filter_conf {
-	int mode;
-	const char* binary;
-	char** binary_args;
-	const char* config_file;
-	int only_check;
+	int mode; /* allowlist or blocklist */
+	const char* binary; /* external program that will receive filter audit events */
+	char** binary_args; /* arguments for external program */
+	const char* config_file; /* file containing audit expressions */
+	int only_check; /* just verify the syntax of the config_file and exit */
 };
 
 /* Global Data */
@@ -73,26 +73,11 @@ static struct filter_list list;
 
 static struct filter_conf config = {
 	.mode = -1,
-					.binary = NULL,
-									.binary_args = NULL,
-									.config_file = NULL,
-									.only_check = 0 };
-
-/*
- * SIGTERM handler
- */
-static void term_handler(int sig) { stop = 1; }
-
-/*
- * SIGHUP handler: re-read config
- */
-static void hup_handler(int sig) {
-	hup = 1;
-}
-
-static void reload_config(void) {
-	hup = 0;
-}
+	.binary = NULL,
+	.binary_args = NULL,
+	.config_file = NULL,
+	.only_check = 0
+};
 
 static void handle_event(auparse_state_t* au, auparse_cb_event_t cb_event_type,
 	void* user_data) {
@@ -117,11 +102,14 @@ static void handle_event(auparse_state_t* au, auparse_cb_event_t cb_event_type,
 		// printf("[handle_event] %s\n", auparse_get_record_text(au));
 		if (asprintf(&records[i], "%s\n", auparse_get_record_text(au)) == -1) {
 			syslog(LOG_ERR, "Failed to allocate memory for a record");
-			break;
+			goto cleanup;
 		}
 		i++;
 	} while (auparse_next_record(au) > 0);
 
+	/* reconstruct the audit event from the buffer, allowing expression addition.
+	Then, use ausearch_next_event() to check for ruleset matches. Unfortunately,
+	this operation cannot be done directly on the 'au' input parameter. */
 	autest = auparse_init(AUSOURCE_BUFFER_ARRAY, records);
 	if (!autest) {
 		syslog(LOG_ERR, "The auparse_init failed, not able to process %d records",
@@ -162,13 +150,12 @@ static void handle_event(auparse_state_t* au, auparse_cb_event_t cb_event_type,
 			if (write_rc == -1) {
 				syslog(LOG_ERR, "Failed to write to pipe");
 			}
-			printf("[forward_event] str=%s", records[i]);
+			// printf("[forward_event] str=%s", records[i]);
 		}
 	}
 
 cleanup:
-	if (au != NULL) {
-		ausearch_clear(autest);
+	if (autest != NULL) {
 		auparse_destroy(autest);
 	}
 
@@ -345,6 +332,9 @@ static struct filter_rule* parse_line(char* line, int lineno) {
 	return rule;
 }
 
+/*
+ * Load rules from config into our linked list
+ */
 static int load_rules(struct filter_list* list) {
 	int fd, lineno = 0;
 	struct stat st;
@@ -407,6 +397,37 @@ static int load_rules(struct filter_list* list) {
 	return errors;
 }
 
+/*
+ * SIGTERM handler
+ */
+static void term_handler(int sig) {
+	stop = 1;
+}
+
+/*
+ * SIGHUP handler: re-read config
+ */
+static void hup_handler(int sig) {
+	hup = 1;
+}
+
+static void reload_config(void) {
+	hup = 0;
+	struct filter_list new_list;
+
+	/* load new rules */
+	if (load_rules(&new_list)) {
+		syslog(LOG_INFO, "The rules were not reloaded because of a syntax error");
+		free_rules(&new_list);
+		return;
+	}
+
+	/* remove unused previous rules */
+	free_rules(&list);
+	list = new_list;
+	syslog(LOG_INFO, "Successfully reloaded rules");
+}
+
 int main(int argc, const char* argv[]) {
 	auparse_state_t* au = NULL;
 	struct sigaction sa;
@@ -431,8 +452,7 @@ int main(int argc, const char* argv[]) {
 		return 0;
 	}
 
-	print_rules(&list);
-	return 0;
+	// print_rules(&list);
 
 	/* Register sighandlers */
 	sa.sa_flags = 0;
@@ -482,6 +502,7 @@ int main(int argc, const char* argv[]) {
 		au = auparse_init(AUSOURCE_FEED, 0);
 		if (au == NULL) {
 			syslog(LOG_ERR, "%s: failed to initialize auparse data feed", argv[0]);
+			kill(cpid, SIGTERM);
 			return -1;
 		}
 
