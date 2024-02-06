@@ -277,18 +277,14 @@ int main(int argc, const char *argv[])
 				{
 					ssize_t rc;
 					if ((rc = audit_fgets(tmp,
-									MAX_AUDIT_MESSAGE_LENGTH, 0)) > 0)
+										  MAX_AUDIT_MESSAGE_LENGTH, 0)) > 0)
 					{
 						printf("[SYSLOG plugin] %s\n", tmp);
 						write_syslog(tmp);
-						printf("Szevasz 1\n");
 					}
-					printf("Szevasz 2 rc=%u tmp = %s\n", rc, tmp);
 				} while (audit_fgets_more(
 					MAX_AUDIT_MESSAGE_LENGTH));
-				printf("Szevasz 3\n");
 			}
-			printf("Szevasz 4\n");
 		}
 		if (audit_fgets_eof())
 			break;

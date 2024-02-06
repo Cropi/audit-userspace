@@ -52,22 +52,34 @@ struct filter_list
 	struct filter_rule *tail;
 };
 
-/* Global Data */
-static volatile int stop = 0;
-static volatile int hup = 0;
-static int pipefd[2];
-
 enum
 {
 	ALLOWLIST,
 	BLOCKLIST
 };
-static int mode = -1;
-static const char *binary = NULL;
-static char **binary_args = NULL;
-static const char *config_file = NULL;
+
+struct filter_conf
+{
+	int mode;
+	const char *binary;
+	char **binary_args;
+	const char *config_file;
+	int only_check;
+};
+
+/* Global Data */
+static volatile int stop = 0;
+static volatile int hup = 0;
+static int pipefd[2];
 static int errors = 0;
 static struct filter_list list;
+
+static struct filter_conf config = {
+	.mode = -1,
+	.binary = NULL,
+	.binary_args = NULL,
+	.config_file = NULL,
+	.only_check = 0};
 
 /*
  * SIGTERM handler
@@ -90,19 +102,6 @@ static void reload_config(void)
 	hup = 0;
 }
 
-static void print_list(struct filter_list *list)
-{
-	struct filter_rule *rule;
-	int count = 0;
-
-	printf("List print start\n");
-	for (rule = list->head; rule != NULL; rule = rule->next, count++)
-	{
-		printf("Rule %d on line %d: %s\n", count, rule->lineno, rule->expr);
-	}
-	printf("List print end\n");
-}
-
 static void handle_event(auparse_state_t *au, auparse_cb_event_t cb_event_type, void *user_data)
 {
 	if (cb_event_type != AUPARSE_CB_EVENT_READY)
@@ -113,16 +112,17 @@ static void handle_event(auparse_state_t *au, auparse_cb_event_t cb_event_type, 
 	char **records = malloc(sizeof(char *) * nrecords);
 	if (!records)
 		return;
+	auparse_state_t *autest = NULL;
 
 	/* save the whole event to a 2D dynamic array, based on preconfigured rules we will:
-		- either forward them to the child process
+		- either forward them to the child process(external program)
 		- or completely drop them
 	*/
 	i = 0;
 	auparse_first_record(au);
 	do
 	{
-		printf("[handle_event] %s\n", auparse_get_record_text(au));
+		// printf("[handle_event] %s\n", auparse_get_record_text(au));
 		if (asprintf(&records[i], "%s\n", auparse_get_record_text(au)) == -1)
 		{
 			syslog(LOG_ERR, "Failed to allocate memory for record");
@@ -131,24 +131,39 @@ static void handle_event(auparse_state_t *au, auparse_cb_event_t cb_event_type, 
 		i++;
 	} while (auparse_next_record(au) > 0);
 
-	ausearch_set_stop(au, AUSEARCH_STOP_EVENT);
+	autest = auparse_init(AUSOURCE_BUFFER_ARRAY, records);
+	if (!autest)
+	{
+		syslog(LOG_ERR, "auparse_init failed, not able to process %d records", nrecords);
+		goto cleanup;
+	}
+
+	ausearch_set_stop(autest, AUSEARCH_STOP_EVENT);
 
 	// add rules(expressions) to the ausearch engine
 	for (struct filter_rule *rule = list.head; rule != NULL; rule = rule->next)
 	{
 		char *error = NULL;
-		rc = ausearch_add_expression(au, rule->expr, &error, AUSEARCH_RULE_OR);
+		rc = ausearch_add_expression(autest, rule->expr, &error, AUSEARCH_RULE_OR);
+		if (rc != 0)
+		{
+			syslog(LOG_ERR, "Failed to add expression '%s' to ausearch, reason: %s", rule->expr, error);
+			free(error);
+			goto cleanup;
+		}
+		free(error);
 	}
 
 	// Determine whether to forward or drop the event
-	rc = ausearch_next_event(au);
+	rc = ausearch_next_event(autest);
+	// printf("[handle_event] ausearch_next_event rc=%d\n", rc);
 	if (rc > 0) /* matched */
 	{
-		forward_event = (mode == ALLOWLIST) ? 0 : 1;
+		forward_event = (config.mode == ALLOWLIST) ? 0 : 1;
 	}
 	else if (rc == 0) /* not matched */
 	{
-		forward_event = (mode == ALLOWLIST) ? 1 : 0;
+		forward_event = (config.mode == ALLOWLIST) ? 1 : 0;
 	}
 	else
 	{
@@ -165,11 +180,17 @@ static void handle_event(auparse_state_t *au, auparse_cb_event_t cb_event_type, 
 			{
 				syslog(LOG_ERR, "Failed to write to pipe\n");
 			}
-			printf("[forward_event] str=%s\n", records[i]);
+			printf("[forward_event] str=%s", records[i]);
 		}
 	}
 
 cleanup:
+	if (au != NULL)
+	{
+		ausearch_clear(autest);
+		auparse_destroy(autest);
+	}
+
 	for (i = 0; i < nrecords; i++)
 	{
 		free(records[i]);
@@ -177,48 +198,73 @@ cleanup:
 	free(records);
 }
 
+static void free_args()
+{
+	if (config.binary_args)
+	{
+		for (int i = 0; config.binary_args[i] != NULL; i++)
+		{
+			free(config.binary_args[i]);
+		}
+		free(config.binary_args);
+	}
+}
+
 static int parse_args(int argc, const char *argv[])
 {
+	if (argc == 3 && (strcmp("--check", argv[1]) == 0))
+	{
+		config.config_file = argv[2];
+		config.only_check = 1;
+		return 0;
+	}
+
 	if (argc <= 3)
 	{
 		syslog(LOG_ERR, "%s: Not enough arguments", argv[0]);
 		return 1;
 	}
 
-	for (int i = 0; i < argc; i++)
-	{
-		printf("arg %d = %s\n", i, argv[i]);
-	}
-
 	if (strcasecmp(argv[1], "allowlist") == 0)
-		mode = ALLOWLIST;
+		config.mode = ALLOWLIST;
 	else if (strcasecmp(argv[1], "blocklist") == 0)
-		mode = BLOCKLIST;
+		config.mode = BLOCKLIST;
 	else
 	{
 		syslog(LOG_ERR, "Invalid mode %s specified, possible values are: allowlist, blocklist.", argv[1]);
 		return 1;
 	}
 
-	config_file = argv[2];
-	binary = argv[3];
+	config.config_file = argv[2];
+	config.binary = argv[3];
 
 	argc -= 3;
 	argv += 3;
 
-	binary_args = malloc(sizeof(char *) * (argc + 1)); /* +1 is for the last NULL */
-	if (!binary_args)
-		return -1;
+	config.binary_args = malloc(sizeof(char *) * (argc + 1)); /* +1 is for the last NULL */
+	if (!config.binary_args)
+		return 1;
+
 	for (int i = 0; i < argc; i++)
 	{
-		binary_args[i] = (char *)argv[i];
+		config.binary_args[i] = strdup(argv[i]);
+		if (!config.binary_args[i])
+		{
+			while (i > 0)
+			{
+				free(config.binary_args[--i]);
+			}
+			free(config.binary_args);
+			return 1;
+		}
 	}
-	binary_args[argc] = NULL;
+	config.binary_args[argc] = NULL;
 
 	return 0;
 }
 
-static char *get_line(FILE *f, char *buf, unsigned size, int lineno, const char *file)
+static char *get_line(FILE *f, char *buf, unsigned size, int *lineno,
+					  const char *file)
 {
 	int too_long = 0;
 
@@ -233,31 +279,53 @@ static char *get_line(FILE *f, char *buf, unsigned size, int lineno, const char 
 				*ptr = 0;
 				return buf;
 			}
-			// Reset and start with trules
+			// Reset and start with the next line
+			too_long = 0;
+			*lineno = *lineno + 1;
+		}
+		else
+		{
+			// If a line is too long skip it.
+			// Only output 1 warning
+			if (!too_long)
+				syslog(LOG_WARNING,
+					   "Skipping line %d in %s: too long",
+					   *lineno, file);
 			too_long = 1;
 		}
 	}
 	return NULL;
 }
 
-static void reset_list(struct filter_list *list)
+static void print_rules(struct filter_list *list)
+{
+	struct filter_rule *rule;
+	int count = 0;
+
+	for (rule = list->head; rule != NULL; rule = rule->next, count++)
+	{
+		printf("Rule %d on line %d: %s\n", count, rule->lineno, rule->expr);
+	}
+}
+
+static void reset_rules(struct filter_list *list)
 {
 	list->head = list->tail = NULL;
 }
 
-static void free_filter_rule(struct filter_rule *rule)
+static void free_rule(struct filter_rule *rule)
 {
 	free(rule->expr);
 }
 
-static void free_filter_list(struct filter_list *list)
+static void free_rules(struct filter_list *list)
 {
 	struct filter_rule *current = list->head, *to_delete;
 	while (current != NULL)
 	{
 		to_delete = current;
 		current = current->next;
-		free_filter_rule(to_delete);
+		free_rule(to_delete);
 		free(to_delete);
 	}
 }
@@ -283,10 +351,11 @@ static struct filter_rule *parse_line(char *line, int lineno)
 	int rc;
 	char *error = NULL;
 
+	/* dummy instance of the audit parsing library, we use it to
+	validate search expressions that will be added to the filter engine */
 	if ((au = auparse_init(AUSOURCE_BUFFER_ARRAY, buf)) == NULL)
 	{
-		// syslog(LOG_ERR, "auparse_init failed");
-		printf("auparse_init failll\n");
+		syslog(LOG_ERR, "auparse_init failed");
 		return NULL;
 	}
 
@@ -319,7 +388,7 @@ static struct filter_rule *parse_line(char *line, int lineno)
 	if (ausearch_add_expression(au, rule->expr, &error, AUSEARCH_RULE_OR) != 0)
 	{
 		syslog(LOG_ERR, "Invalid expression: %s, reason: %s\n", rule->expr, error);
-		free_filter_rule(rule);
+		free_rule(rule);
 		free(rule);
 		rule = NULL;
 		errors++;
@@ -336,11 +405,11 @@ static int load_rules(struct filter_list *list)
 	char buf[1024];
 	FILE *f;
 
-	reset_list(list);
+	reset_rules(list);
 	errors = 0;
 
 	/* open the file */
-	if ((fd = open(config_file, O_RDONLY)) < 0)
+	if ((fd = open(config.config_file, O_RDONLY)) < 0)
 	{
 		if (errno != ENOENT)
 		{
@@ -349,7 +418,7 @@ static int load_rules(struct filter_list *list)
 			return 1;
 		}
 		syslog(LOG_ERR,
-			   "Config file %s doesn't exist, skipping", config_file);
+			   "Config file %s doesn't exist, skipping", config.config_file);
 		return 1;
 	}
 
@@ -363,21 +432,21 @@ static int load_rules(struct filter_list *list)
 	if (st.st_uid != 0)
 	{
 		syslog(LOG_ERR, "Error - %s isn't owned by root",
-			   config_file);
+			   config.config_file);
 		close(fd);
 		return 1;
 	}
 	if ((st.st_mode & S_IWOTH) == S_IWOTH)
 	{
 		syslog(LOG_ERR, "Error - %s is world writable",
-			   config_file);
+			   config.config_file);
 		close(fd);
 		return 1;
 	}
 	if (!S_ISREG(st.st_mode))
 	{
 		syslog(LOG_ERR, "Error - %s is not a regular file",
-			   config_file);
+			   config.config_file);
 		close(fd);
 		return 1;
 	}
@@ -392,7 +461,7 @@ static int load_rules(struct filter_list *list)
 		return 1;
 	}
 
-	while (get_line(f, buf, sizeof(buf), lineno, config_file))
+	while (get_line(f, buf, sizeof(buf), &lineno, config.config_file))
 	{
 		lineno++;
 		struct filter_rule *rule;
@@ -413,16 +482,27 @@ int main(int argc, const char *argv[])
 	char buffer[MAX_AUDIT_MESSAGE_LENGTH];
 	pid_t cpid;
 
+	/* validate args */
 	if (parse_args(argc, argv))
 		return 1;
 
+	/* create a list of rules from config file */
 	if (load_rules(&list))
 	{
-		free_filter_list(&list);
+		free_rules(&list);
+		free_args();
 		return 1;
 	}
 
-	print_list(&list);
+	/* let's just validate our ruleset and exit */
+	if (config.only_check)
+	{
+		free_rules(&list);
+		free_args();
+		return 0;
+	}
+
+	print_rules(&list);
 
 	/* Register sighandlers */
 	sa.sa_flags = 0;
@@ -461,7 +541,7 @@ int main(int argc, const char *argv[])
 		dup2(pipefd[0], STDIN_FILENO);
 		close(pipefd[0]);
 
-		execve(binary, binary_args, NULL);
+		execve(config.binary, config.binary_args, NULL);
 		syslog(LOG_ERR, "%s execve errored\n", argv[0]);
 	}
 	else
@@ -504,8 +584,6 @@ int main(int argc, const char *argv[])
 				else
 					retval = select(1, &read_mask, NULL, NULL, NULL);
 
-				printf("SSSS\n");
-
 				/* If we timed out & have events, shake them loose */
 				if (retval == 0 && auparse_feed_has_data(au))
 					auparse_feed_age_events(au);
@@ -523,11 +601,14 @@ int main(int argc, const char *argv[])
 			if (read_size == 0) /* EOF */
 				break;
 		} while (stop == 0);
+		kill(cpid, SIGTERM);
 
 		auparse_flush_feed(au);
 		auparse_destroy(au);
 		waitpid(cpid, NULL, 0);
 	}
 
+	free_rules(&list);
+	free_args();
 	return 0;
 }
