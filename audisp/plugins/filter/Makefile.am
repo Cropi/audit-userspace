@@ -22,13 +22,13 @@
 #
 
 CONFIG_CLEAN_FILES = *.loT *.rej *.orig
-EXTRA_DIST = filter.conf $(man_MANS)
+EXTRA_DIST = filter-syslog.conf $(man_MANS)
 AM_CPPFLAGS = -I${top_srcdir} -I${top_srcdir}/lib -I${top_srcdir}/common -I${top_srcdir}/auparse
 prog_confdir = $(sysconfdir)/audit
 plugin_confdir=$(prog_confdir)/plugins.d
-plugin_conf = filter.conf
+plugin_conf = filter-syslog.conf
 sbin_PROGRAMS = audisp-filter
-# man_MANS = audisp-filter.8 TODO
+man_MANS = audisp-filter.8
 
 audisp_filter_DEPENDENCIES = ${top_builddir}/common/libaucommon.la
 audisp_filter_SOURCES = audisp-filter.c

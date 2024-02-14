@@ -86,7 +86,7 @@ static void handle_event(auparse_state_t* au, auparse_cb_event_t cb_event_type,
 
 	int rc, forward_event, i;
 	int nrecords = auparse_get_num_records(au);
-	char** records = malloc(sizeof(char*) * nrecords);
+	char** records = malloc(sizeof(char*) * (nrecords + 1));
 	if (!records)
 		return;
 	auparse_state_t* autest = NULL;
@@ -106,6 +106,7 @@ static void handle_event(auparse_state_t* au, auparse_cb_event_t cb_event_type,
 		}
 		i++;
 	} while (auparse_next_record(au) > 0);
+	records[i] = NULL;
 
 	/* reconstruct the audit event from the buffer, allowing expression addition.
 	Then, use ausearch_next_event() to check for ruleset matches. Unfortunately,

@@ -22,12 +22,24 @@ Optionally, you can pass additional arguments to the external program.
 .RE
 
 .SH CONFIGURATION AND RULES EVALUATION
-Every single plugin that wants to benefit from the event filtering capability, needs to create its own configuration file. It's a good practice to place it inside the audit config file directory as audisp-filter-pluginname, e.g.
-.B audisp-filter-syslog.
-Each line within a configuration represents an ausearch expression. Internally, lines are joined together using the OR operator.
+Every single plugin that wants to benefit from the event filtering capability needs to create its own configuration file. It's a good practice to place this file inside the audit config directory, following the naming convention audisp-filter-pluginname.conf, for instance,
+.B audisp-filter-syslog.conf
+to filter audit events before sending them to syslog.
+
+Each line within a configuration represents an ausearch-expression (5). Internally, these expressions are joined using the OR operator. Therefore, every expression is substituted with (PE || CE), where PE represents the previous expression and CE denotes the current expression being processed.
 Lines starting with a
 .B '#'
 character are treated as comments and do not influence the final rule set.
+
+Upon the creation of an audit event, the filtering engine goes through the list of expressions, constructing the final expression representing our rule set. The event in question will be searched using this expression. The decision to forward an audit event to the configured binary depends on two factors: the operational mode of audisp-filter and whether the expression matches the ongoing event.
+
+.SH EXAMPLE
+Example1: Do not syslog audit events containing unsuccessful openat syscalls.
+
+First, in the plugin config, make sure that operation mode is set to allowlist, the binary points to /sbin/audispFyslog and provide any additional arguments if needed. Next, create the plugin specific config file with the content below. Before enabling the audit plugin, always make sure the syntax is correct. This can be checked by calling audisp-filter --check path/to/config/file.
+
+.B (type r= SYSCALL && syscall r= openat && success r= yes)
+
 
 .SH FILES
 /etc/audit/plugins/filter.conf
