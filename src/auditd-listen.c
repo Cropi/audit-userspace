@@ -184,18 +184,20 @@ static int ar_write(int sock, const void *buf, int len)
 #ifdef USE_GSSAPI
 static int ar_read(int sock, void *buf, int len)
 {
-	int rc = 0, r;
-	while (len > 0) {
+	int rc = 0;
+	ssize_t r;
+	while (len > 0 && len > rc) {
 		do {
-			r = read(sock, buf, len);
+			r = read(sock, buf + rc, len - rc);
 		} while (r < 0 && errno == EINTR);
+		if (r < INT_MIN || r > INT_MAX) {
+			return -1;
+		}
 		if (r < 0)
 			return r;
 		if (r == 0)
 			break;
 		rc += r;
-		len -= r;
-		buf = (void *)((char *)buf + r);
 	}
 	return rc;
 }
