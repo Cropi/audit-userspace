@@ -519,7 +519,7 @@ auparse_state_t *auparse_init(ausource_t source, const void *b)
 		case AUSOURCE_BUFFER:
 			if (buf == NULL)
 				goto bad_exit;
-			len = strlen(buf);
+			len = strlen(buf) + 1;
 			if (databuf_init(&au->databuf, len,
 					 DATABUF_FLAG_PRESERVE_HEAD) < 0)
 				goto bad_exit;
