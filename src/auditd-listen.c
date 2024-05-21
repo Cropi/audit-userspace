@@ -585,6 +585,7 @@ static void auditd_tcp_client_handler(struct ev_loop *loop,
 	int total_this_call = 0;
 
 	io->client_active = 1;
+	io->bufptr = 0;
 
 	/* The socket is non-blocking, but we have a limited buffer
 	   size.  In the event that we get a packet that's bigger than
