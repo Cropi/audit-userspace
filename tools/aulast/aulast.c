@@ -71,7 +71,7 @@ static void report_session(lnode* cur)
 	} else
 		printf("%-8.u ", cur->auid);
 
-	if (strncmp("/dev/", cur->term, 5) == 0)
+	if (strlen(cur->term) >= 5 && strncmp("/dev/", cur->term, 5) == 0)
 		printf("%-12.12s ", cur->term+5);
 	else
 		printf("%-12.12s ", cur->term);
