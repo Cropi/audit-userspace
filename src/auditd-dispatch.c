@@ -1,4 +1,4 @@
-/* auditd-dispatch.c -- 
+/* auditd-dispatch.c --
  * Copyright 2005-07,2013,2016-17 Red Hat Inc., Durham, North Carolina.
  * All Rights Reserved.
  *
@@ -80,9 +80,10 @@ int dispatch_event(const struct audit_reply *rep, int protocol_ver)
 	e->hdr.type = rep->type;
 
 	// Network originating events have data at rep->message
+	struct nlmsghdr* nlh = (struct nlmsghdr*)&rep->msg.nlh;
 	if (protocol_ver == AUDISP_PROTOCOL_VER) {
-		e->hdr.size = rep->msg.nlh.nlmsg_len;
-		memcpy(e->data, (void*)rep->msg.data, e->hdr.size);
+		e->hdr.size = nlh->nlmsg_len;
+		memcpy(e->data, (void*) NLMSG_DATA(rep->msg.nlh), e->hdr.size);
 	} else if (protocol_ver == AUDISP_PROTOCOL_VER2) {
 		e->hdr.size = rep->len;
 		memcpy(e->data, (void*)rep->message, e->hdr.size);

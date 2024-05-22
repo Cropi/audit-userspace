@@ -53,10 +53,10 @@ int audit_open(void)
 		if (errno == EINVAL || errno == EPROTONOSUPPORT ||
 				errno == EAFNOSUPPORT)
 			audit_msg(LOG_ERR,
-				"Error - audit support not in kernel"); 
+				"Error - audit support not in kernel");
 		else
 			audit_msg(LOG_ERR,
-				"Error opening audit netlink socket (%s)", 
+				"Error opening audit netlink socket (%s)",
 				strerror(errno));
 	}
 	return fd;
@@ -94,18 +94,18 @@ retry:
 		if (errno == EINTR)
 			goto retry;
 		if (errno != EAGAIN)
-			audit_msg(LOG_ERR, 
-				"Error receiving audit netlink packet (%s)", 
+			audit_msg(LOG_ERR,
+				"Error receiving audit netlink packet (%s)",
 				strerror(errno));
 		return -errno;
 	}
 	if (nladdrlen != sizeof(nladdr)) {
-		audit_msg(LOG_ERR, 
+		audit_msg(LOG_ERR,
 			"Bad address size reading audit netlink socket");
 		return -EPROTO;
 	}
 	if (nladdr.nl_pid) {
-		audit_msg(LOG_ERR, 
+		audit_msg(LOG_ERR,
 			"Spoofed packet received on audit netlink socket");
 		return -EINVAL;
 	}
@@ -113,18 +113,19 @@ retry:
 	len = adjust_reply(rep, len);
 	if (len == 0)
 		len = -errno;
-	return len; 
+	return len;
 }
 
 
-/* 
+/*
  * This function returns 0 on error and len on success.
  */
 static int adjust_reply(struct audit_reply *rep, int len)
 {
-	rep->type     = rep->msg.nlh.nlmsg_type;
-	rep->len      = rep->msg.nlh.nlmsg_len;
-	rep->nlh      = &rep->msg.nlh;
+	struct nlmsghdr *nlh = (struct nlmsghdr *)&rep->msg.nlh;
+	rep->type     = nlh->nlmsg_type;
+	rep->len      = nlh->nlmsg_len;
+	rep->nlh      = nlh;
 	rep->status   = NULL;
 	rep->ruledata = NULL;
 	rep->login    = NULL;
@@ -137,11 +138,11 @@ static int adjust_reply(struct audit_reply *rep, int len)
 #endif
 	if (!NLMSG_OK(rep->nlh, (unsigned int)len)) {
 		if (len == sizeof(rep->msg)) {
-			audit_msg(LOG_ERR, 
+			audit_msg(LOG_ERR,
 				"Netlink event from kernel is too big");
 			errno = EFBIG;
 		} else {
-			audit_msg(LOG_ERR, 
+			audit_msg(LOG_ERR,
 			"Netlink message from kernel was not OK");
 			errno = EBADE;
 		}
@@ -151,19 +152,19 @@ static int adjust_reply(struct audit_reply *rep, int len)
 	/* Next we'll set the data structure to point to msg.data. This is
 	 * to avoid having to use casts later. */
 	switch (rep->type) {
-		case NLMSG_ERROR: 
-			rep->error   = NLMSG_DATA(rep->nlh); 
+		case NLMSG_ERROR:
+			rep->error   = NLMSG_DATA(rep->nlh);
 			break;
-		case AUDIT_GET:   
-			rep->status  = NLMSG_DATA(rep->nlh); 
+		case AUDIT_GET:
+			rep->status  = NLMSG_DATA(rep->nlh);
 			break;
 #if HAVE_DECL_AUDIT_FEATURE_VERSION == 1
 		case AUDIT_GET_FEATURE:
 			rep->features =  NLMSG_DATA(rep->nlh);
 			break;
 #endif
-		case AUDIT_LIST_RULES:  
-			rep->ruledata = NLMSG_DATA(rep->nlh); 
+		case AUDIT_LIST_RULES:
+			rep->ruledata = NLMSG_DATA(rep->nlh);
 			break;
 		case AUDIT_USER:
 		case AUDIT_LOGIN:
@@ -212,10 +213,11 @@ int __audit_send(int fd, int type, const void *data, unsigned int size, int *seq
 	*seq = sequence;
 
 	memset(&req, 0, sizeof(req));
-	req.nlh.nlmsg_len = NLMSG_SPACE(size);
-	req.nlh.nlmsg_type = type;
-	req.nlh.nlmsg_flags = NLM_F_REQUEST|NLM_F_ACK;
-	req.nlh.nlmsg_seq = sequence;
+	struct nlmsghdr* nlh = (struct nlmsghdr*)&req.nlh;
+	nlh->nlmsg_len = NLMSG_SPACE(size);
+	nlh->nlmsg_type = type;
+	nlh->nlmsg_flags = NLM_F_REQUEST|NLM_F_ACK;
+	nlh->nlmsg_seq = sequence;
 	if (size && data)
 		memcpy(NLMSG_DATA(&req.nlh), data, size);
 	memset(&addr, 0, sizeof(addr));
@@ -224,10 +226,10 @@ int __audit_send(int fd, int type, const void *data, unsigned int size, int *seq
 	addr.nl_groups = 0;
 
 	do {
-		retval = sendto(fd, &req, req.nlh.nlmsg_len, 0,
+		retval = sendto(fd, &req, nlh->nlmsg_len, 0,
 			(struct sockaddr*)&addr, sizeof(addr));
 	} while (retval < 0 && errno == EINTR);
-	if (retval == (int)req.nlh.nlmsg_len)
+	if (retval == (int)nlh->nlmsg_len)
 		return check_ack(fd);
 	if (retval < 0) {
 		return -errno;
@@ -252,7 +254,7 @@ int audit_send(int fd, int type, const void *data, unsigned int size)
 
 /*
  * This function will take a peek into the next packet and see if there's
- * an error. If so, the error is returned and its non-zero. Otherwise a 
+ * an error. If so, the error is returned and its non-zero. Otherwise a
  * zero is returned indicating that we don't know of any problems.
  */
 static int check_ack(int fd)
@@ -268,9 +270,9 @@ retry:
 		rc = poll(pfd, 1, 500); /* .5 second */
 	} while (rc < 0 && errno == EINTR);
 
-	/* We don't look at rc from above as it doesn't matter. We are 
+	/* We don't look at rc from above as it doesn't matter. We are
 	 * going to try to read nonblocking just in case packet shows up. */
-	
+
 	/* NOTE: whatever is returned is treated as the errno */
 	rc = audit_get_reply(fd, &rep, GET_REPLY_NONBLOCKING, MSG_PEEK);
 	if (rc == -EAGAIN && retries) {
@@ -286,7 +288,7 @@ retry:
 		if (audit_get_reply(fd, &rep, GET_REPLY_NONBLOCKING, 0))
 			; // intentionally empty
 
-		/* NLMSG_ERROR can indicate success, only report nonzero */ 
+		/* NLMSG_ERROR can indicate success, only report nonzero */
 		if (error) {
 			errno = -error;
 			return error;

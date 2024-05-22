@@ -1,4 +1,4 @@
-/* auditd-reconfig.c -- 
+/* auditd-reconfig.c --
  * Copyright 2005,2021 Red Hat Inc.
  * All Rights Reserved.
  *
@@ -18,7 +18,7 @@
  *
  * Authors:
  *   Steve Grubb <sgrubb@redhat.com>
- * 
+ *
  */
 
 #include "config.h"
@@ -103,8 +103,8 @@ static void *config_thread_main(void *arg)
 				strdup(e->reply.signal_info->ctx);
 		else
 			new_config.sender_ctx = strdup("?");
-		memcpy(e->reply.msg.data, &new_config, sizeof(new_config));
-		e->reply.conf = (struct daemon_conf *)e->reply.msg.data;
+		memcpy(NLMSG_DATA(e->reply.msg.nlh), &new_config, sizeof(new_config));
+		e->reply.conf = (struct daemon_conf *)(NLMSG_DATA(e->reply.msg.nlh));
 		e->reply.type = AUDIT_DAEMON_RECONFIG;
 		reconfig_ready();
 	} else {

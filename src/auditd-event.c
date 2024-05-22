@@ -255,8 +255,11 @@ static void replace_event_msg(struct auditd_event *e, const char *buf)
 			len = MAX_AUDIT_MESSAGE_LENGTH;
 		}
 		// For network originating events, len should be used
-		if (!from_network(e)) // V1 protocol msg size
-			e->reply.msg.nlh.nlmsg_len = e->reply.len;
+		if (!from_network(e)) { // V1 protocol msg size
+			struct nlmsghdr* nlh = (struct nlmsghdr*)&e->reply.msg.nlh;
+			nlh->nlmsg_len = e->reply.len;
+		}
+
 		e->reply.len = len; // V2 protocol msg size
 	}
 }
@@ -521,7 +524,8 @@ void cleanup_event(struct auditd_event *e)
 {
 	// Over in send_audit_event we sometimes have message pointing
 	// into the middle of the reply allocation. Check for it.
-	if (e->reply.message != e->reply.msg.data)
+	char *data = NLMSG_DATA(e->reply.msg.nlh);
+	if (e->reply.message != data)
 		free((void *)e->reply.message);
 	free(e);
 }
@@ -1666,10 +1670,10 @@ static void reconfigure(struct auditd_event *e)
         }
 
 	e->reply.type = AUDIT_DAEMON_CONFIG;
-	e->reply.len = snprintf(e->reply.msg.data, MAX_AUDIT_MESSAGE_LENGTH-2,
+	e->reply.len = snprintf(NLMSG_DATA(e->reply.msg.nlh), MAX_AUDIT_MESSAGE_LENGTH-2,
 	"%s: op=reconfigure state=changed auid=%u pid=%d subj=%s res=success",
 		date, uid, pid, ctx );
-	e->reply.message = e->reply.msg.data;
+	e->reply.message = NLMSG_DATA(e->reply.msg.nlh);
 	free((char *)ctx);
 }
 

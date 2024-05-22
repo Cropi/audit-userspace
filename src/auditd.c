@@ -1,4 +1,4 @@
-/* auditd.c -- 
+/* auditd.c --
  * Copyright 2004-09,2011,2013,2016-18,2021 Red Hat Inc.
  * All Rights Reserved.
  *
@@ -59,7 +59,7 @@
 #define EV_STOP() ev_unloop (ev_default_loop (EVFLAG_AUTO), EVUNLOOP_ALL), stop = 1;
 
 #define DEFAULT_BUF_SZ	448
-#define DMSG_SIZE (DEFAULT_BUF_SZ + 48) 
+#define DMSG_SIZE (DEFAULT_BUF_SZ + 48)
 #define SUCCESS 0
 #define FAILURE 1
 #define SUBJ_LEN 4097
@@ -108,7 +108,7 @@ static void usage(void)
 
 /*
  * SIGTERM handler
- */ 
+ */
 static void term_handler(struct ev_loop *loop, struct ev_signal *sig,
 			int revents)
 {
@@ -125,7 +125,7 @@ static void hup_handler( struct ev_loop *loop, struct ev_signal *sig, int revent
 
 	rc = audit_request_signal_info(fd);
 	if (rc < 0)
-		send_audit_event(AUDIT_DAEMON_CONFIG, 
+		send_audit_event(AUDIT_DAEMON_CONFIG,
 	  "op=reconfigure state=no-change auid=-1 pid=-1 subj=? res=failed");
 	else
 		hup_info_requested = 1;
@@ -141,7 +141,7 @@ static void user1_handler(struct ev_loop *loop, struct ev_signal *sig,
 
 	rc = audit_request_signal_info(fd);
 	if (rc < 0)
-		send_audit_event(AUDIT_DAEMON_ROTATE, 
+		send_audit_event(AUDIT_DAEMON_ROTATE,
 			 "op=rotate-logs auid=-1 pid=-1 subj=? res=failed");
 	else
 		usr1_info_requested = 1;
@@ -157,7 +157,7 @@ static void user2_handler( struct ev_loop *loop, struct ev_signal *sig, int reve
 	rc = audit_request_signal_info(fd);
 	if (rc < 0) {
 		resume_logging();
-		send_audit_event(AUDIT_DAEMON_RESUME, 
+		send_audit_event(AUDIT_DAEMON_RESUME,
 			 "op=resume-logging auid=-1 pid=-1 subj=? res=success");
 	} else
 		usr2_info_requested = 1;
@@ -290,7 +290,7 @@ void distribute_event(struct auditd_event *e)
 }
 
 /*
- * This function is used to send start, stop, and abort messages 
+ * This function is used to send start, stop, and abort messages
  * to the audit log.
  */
 static unsigned seq_num = 0;
@@ -313,18 +313,19 @@ int send_audit_event(int type, const char *str)
 	} else
 		seq_num++;
 	// Write event into netlink area like normal events
+	char* data = NLMSG_DATA(e->reply.msg.nlh);
 	if (gettimeofday(&tv, NULL) == 0) {
-		e->reply.len = snprintf((char *)e->reply.msg.data,
+		e->reply.len = snprintf((char *)data,
 			DMSG_SIZE, "audit(%lld.%03u:%u): %s",
 			(long long int)tv.tv_sec, (unsigned)(tv.tv_usec/1000),
 			seq_num, str);
 	} else {
-		e->reply.len = snprintf((char *)e->reply.msg.data,
+		e->reply.len = snprintf((char *)data,
 			DMSG_SIZE, "audit(%lld.%03d:%u): %s",
 			(long long int)time(NULL), 0, seq_num, str);
 	}
 	// Point message at the netlink buffer like normal events
-	e->reply.message = e->reply.msg.data;
+	e->reply.message = data;
 	if (e->reply.len > DMSG_SIZE)
 		e->reply.len = DMSG_SIZE;
 
@@ -366,7 +367,7 @@ static void avoid_oom_killer(void)
 	int oomfd, len, rc;
 	char *score = NULL;
 
-	/* New kernels use different technique */	
+	/* New kernels use different technique */
 	if ((oomfd = open("/proc/self/oom_score_adj",
 				O_NOFOLLOW | O_WRONLY)) >= 0) {
 		score = "-1000";
@@ -732,13 +733,13 @@ int main(int argc, char *argv[])
 		if (nice((int)-config.priority_boost))
 			; /* Intentionally blank, we have to check errno */
 		if (errno) {
-			audit_msg(LOG_ERR, "Cannot change priority (%s)", 
+			audit_msg(LOG_ERR, "Cannot change priority (%s)",
 					strerror(errno));
 			free_config(&config);
 			return 1;
 		}
-	} 
-	
+	}
+
 	/* Daemonize or stay in foreground for debugging */
 	if (config.daemonize == D_BACKGROUND) {
 		if (become_daemon() != 0) {
@@ -747,7 +748,7 @@ int main(int argc, char *argv[])
 			tell_parent(FAILURE);
 			free_config(&config);
 			return 1;
-		} 
+		}
 		openlog("auditd", LOG_PID, LOG_DAEMON);
 	}
 
@@ -1010,10 +1011,10 @@ int main(int argc, char *argv[])
 			audit_format_signal_info(txt, sizeof(txt), "terminate",
 						 &trep, "success");
 			send_audit_event(AUDIT_DAEMON_END, txt);
-		} 
-	} 
+		}
+	}
 	if (rc <= 0)
-		send_audit_event(AUDIT_DAEMON_END, 
+		send_audit_event(AUDIT_DAEMON_END,
 		"op=terminate auid=-1 uid=-1 ses=-1 pid=-1 subj=? res=success");
 	free(cur_event);
 
@@ -1041,7 +1042,7 @@ int main(int argc, char *argv[])
 
 
 /*
- * A clean exit means : 
+ * A clean exit means :
  * 1) we log that we are going down
  * 2) deregister with kernel
  * 3) close the netlink socket

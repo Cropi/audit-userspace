@@ -107,8 +107,7 @@ struct audit_sig_info {
 /* defines for audit subsystem */
 #define MAX_AUDIT_MESSAGE_LENGTH    8970 // PATH_MAX*2+CONTEXT_SIZE*2+11+256+1
 struct audit_message {
-	struct nlmsghdr nlh;
-	char   data[MAX_AUDIT_MESSAGE_LENGTH];
+	char   nlh[NLMSG_SPACE(MAX_AUDIT_MESSAGE_LENGTH)];
 };
 
 // internal - forward declaration
