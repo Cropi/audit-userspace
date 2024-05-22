@@ -495,7 +495,7 @@ auparse_state_t *auparse_init(ausource_t source, const void *b)
 			if (access_ok(b))
 				goto bad_exit;
 			tmp = malloc(2*sizeof(char *));
-			if (tmp == NULL) 
+			if (tmp == NULL)
 				goto bad_exit;
 			tmp[0] = strdup(b);
 			tmp[1] = NULL;
@@ -519,7 +519,7 @@ auparse_state_t *auparse_init(ausource_t source, const void *b)
 		case AUSOURCE_BUFFER:
 			if (buf == NULL)
 				goto bad_exit;
-			len = strlen(buf);
+			len = strlen(buf) + 1;
 			if (databuf_init(&au->databuf, len,
 					 DATABUF_FLAG_PRESERVE_HEAD) < 0)
 				goto bad_exit;
