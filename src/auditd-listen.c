@@ -586,8 +586,8 @@ static void auditd_tcp_client_handler(struct ev_loop *loop,
 			struct ev_io *_io, int revents)
 {
 	struct ev_tcp *io = (struct ev_tcp *)_io;
-	int i, r;
-	int total_this_call = 0;
+	int i;
+	ssize_t total_this_call = 0, r;
 
 	io->client_active = 1;
 
@@ -601,31 +601,33 @@ read_more:
 		  io->buffer + io->bufptr,
 		  MAX_AUDIT_MESSAGE_LENGTH - io->bufptr);
 
-	if (r < 0 && errno == EAGAIN)
-		r = 0;
+	if (r < 0) {
+		if (errno == EAGAIN) {
+			r = 0; // No data available now, try again later
+		} else {
+			/* Fatal error, we need to close the connection */
+			audit_msg(LOG_WARNING, "client %s socket read error: %s",
+				sockaddr_to_addr(&io->addr), strerror(errno));
+			ev_io_stop(loop, _io);
+			close_client(io);
+			return;
+		}
+	}
 
 	/* We need to keep track of the difference between "no data
 	 * because it's closed" and "no data because we've read it
-	 * all".  */
+	 * all". */
 	if (r == 0 && total_this_call > 0) {
 		return;
 	}
 
 	/* If the connection is gracefully closed, the first read we
-	   try will return zero.  If the connection times out or
-	   otherwise fails, the read will return -1.  */
-	if (r <= 0) {
-		if (r < 0)
-			audit_msg(LOG_WARNING,
-				"client %s socket closed unexpectedly",
-				sockaddr_to_addr(&io->addr));
-
+	 * try will return zero. Or there is nothing to be read. */
+	if (r == 0) {
 		/* There may have been a final message without a LF.  */
 		if (io->bufptr) {
 			client_message(io, io->bufptr, io->buffer);
-
 		}
-
 		ev_io_stop(loop, _io);
 		close_client(io);
 		return;
