@@ -43,16 +43,21 @@
 #endif
 #include "libaudit.h"
 #include "common.h"
+#include "audispd-pconfig.h"
 
 #define DEFAULT_PATH "/var/run/audispd_events"
 //#define DEBUG
 
 /* Global Data */
 static volatile int stop = 0, hup = 0;
-char rx_buf[MAX_AUDIT_MESSAGE_LENGTH];
+char *rx_buf;
+size_t buf_len;
+char buf_str[MAX_AUDIT_MESSAGE_LENGTH + 1];
+char buf_bin[MAX_AUDIT_MESSAGE_LENGTH + sizeof(struct audit_dispatcher_header) + 1];
 int sock = -1, conn = -1, client = 0;
 struct pollfd pfd[3];
 unsigned mode = 0;
+format_t format = -1;
 char *path = NULL;
 
 /*
@@ -119,57 +124,63 @@ int create_af_unix_socket(const char *spath, int mode)
 
 int setup_socket(int argc, char *argv[])
 {
-	if (argc != 3) {
-		syslog(LOG_ERR, "Missing arguments, using defaults");
-		mode = 0640;
-		path = DEFAULT_PATH;
-	} else {
-		int i;
-		for (i=1; i < 3; i++) {
-			if (isdigit((unsigned char)argv[i][0])) {
-				errno = 0;
-				mode = strtoul(argv[i], NULL, 8);
-				if (errno) {
-					syslog(LOG_ERR,
-					       "Error converting %s (%s)",
-					       argv[i], strerror(errno));
-					mode = 0;
-				}
-			} else {
-				char *base;
-				path = argv[i];
-				// Make sure there are directories
-				base = strchr(path, '/');
-				if (base) {
-					DIR *d;
-					char *dir = strdup(path);
-					base = dirname(dir);
-					d = opendir(base);
-					if (d) {
-						closedir(d);
-						unlink(path);
-						free(dir);
-					} else {
-						syslog(LOG_ERR,
-						       "Couldn't open %s (%s)",
-						       base, strerror(errno));
-						free(dir);
-						exit(1);
-					}
-
+	for (int i = 1; i < argc; i++) {
+		char *arg = argv[i];
+		if (isdigit((unsigned char)arg[0])) {
+			// parse mode
+			errno = 0;
+			mode = strtoul(arg, NULL, 8);
+			if (errno) {
+				syslog(LOG_ERR,
+					"Error converting %s (%s)",
+					arg[i], strerror(errno));
+				mode = 0;
+			}
+		} else if (strchr(arg, '/') != NULL) {
+			// parse path
+			char* base;
+			path = arg;
+			// Make sure there are directories
+			base = strchr(path, '/');
+			if (base) {
+				DIR* d;
+				char* dir = strdup(path);
+				base = dirname(dir);
+				d = opendir(base);
+				if (d) {
+					closedir(d);
+					unlink(path);
+					free(dir);
 				} else {
-					syslog(LOG_ERR, "Malformed path %s",
-					       path);
+					syslog(LOG_ERR,
+						"Couldn't open %s (%s)",
+						base, strerror(errno));
+					free(dir);
 					exit(1);
 				}
+
+			} else {
+				syslog(LOG_ERR, "Malformed path %s",
+					path);
+				exit(1);
 			}
-		}
-		if (mode == 0 || path == NULL) {
-			syslog(LOG_ERR, "Bad arguments, using defaults");
-			mode = 0640;
-			path = DEFAULT_PATH;
+		} else {
+			if (strcmp(arg, "string") == 0)
+				format = F_STRING;
+			else if (strcmp(arg, "binary") == 0)
+				format = F_BINARY;
+			else
+				syslog(LOG_ERR, "Invalid format detected");
 		}
 	}
+
+	if (mode == 0 || path == NULL || format == -1) {
+		syslog(LOG_ERR, "Bad or not enough arguments, using defaults");
+		mode = 0640;
+		path = DEFAULT_PATH;
+		format = F_STRING;
+	}
+
 	return create_af_unix_socket(path, mode);
 }
 
@@ -179,7 +190,7 @@ void read_audit_record(int ifd)
 		int len;
 
 		// Read stdin
-		if ((len = audit_fgets(rx_buf, sizeof(rx_buf), ifd)) > 0) {
+		if ((len = audit_fgets(rx_buf, buf_len, ifd)) > 0) {
 #ifdef DEBUG
 			write(1, rx_buf, len);
 #else
@@ -203,7 +214,7 @@ void read_audit_record(int ifd)
 #endif
 		} else if (audit_fgets_eof())
 			stop = 1;
-	} while (audit_fgets_more(sizeof(rx_buf)));
+	} while (audit_fgets_more(buf_len));
 }
 
 void accept_connection(void)
@@ -305,6 +316,21 @@ int main(int argc, char *argv[])
 	if (setup_socket(argc, argv)) {
 		syslog(LOG_ERR, "audisp-af_unix plugin exiting");
 		exit(1);
+	}
+
+	/* In order to preserve old builtin af_unix behavior, we need to know if
+	 *   input is raw binary data retrieved from audit daemon
+	 *   input is human readable string
+	 * In binary mode, in addition to the data, there is the audit_dispatcher_header
+	 * structure attached.
+	 * TODO: use dynamic memory allocation?
+	 */
+	if (format == F_STRING) {
+		rx_buf = buf_str;
+		buf_len = MAX_AUDIT_MESSAGE_LENGTH + 1;
+	} else {
+		rx_buf = buf_bin;
+		buf_len = MAX_AUDIT_MESSAGE_LENGTH + sizeof(struct audit_dispatcher_header) + 1;
 	}
 
 #ifdef HAVE_LIBCAP_NG
