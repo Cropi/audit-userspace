@@ -50,6 +50,8 @@ char *audit_strsplit_r(char *s, char **savedpp);
 char *audit_strsplit(char *s);
 int audit_is_last_record(int type);
 
+int plymouth_send(const char *msg);
+
 AUDIT_HIDDEN_END
 #endif
 

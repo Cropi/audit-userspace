@@ -20,6 +20,10 @@
  *      Steve Grubb <sgrubb@redhat.com>
  */
 
+#include <unistd.h>
+#include <sys/un.h>
+#include <string.h>
+#include <errno.h>
 #include "libaudit.h"
 #include "common.h"
 
@@ -55,3 +59,28 @@ int audit_is_last_record(int type)
 	return 0;
 }
 
+int plymouth_send(const char *msg)
+{
+	int fd;
+	const struct sockaddr_un addr = {
+		.sun_family = AF_UNIX,
+		.sun_path = "\0/org/freedesktop/plymouthd",
+	};
+
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0)
+		return fd;
+
+	if (connect(fd, &addr, sizeof(struct sockaddr_un) ) < 0) {
+		close(fd);
+		return -errno;
+	}
+
+	if (write(fd, msg, strlen(msg)) < 0) {
+		close(fd);
+		return -errno;
+	}
+
+	close(fd);
+	return 0;
+}
