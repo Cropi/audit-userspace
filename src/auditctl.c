@@ -69,6 +69,8 @@ static int ignore = 0, continue_error = 0;
 static int exclude = 0;
 static int multiple = 0;
 static struct audit_rule_data *rule_new = NULL;
+static int translate = 0;
+static FILE *v_out = NULL;
 
 /*
  * This function will reset everything used for each loop when loading
@@ -1415,6 +1417,21 @@ static int fileopt(const char *file)
 		rc = setopt(i, lineno, fields);
 		free(fields);
 
+		/* No request is sent if we just translate the rules */
+		if (rc != -3 && translate) {
+			/* If !task and no syscall has been specified -> add all */
+			if ((add & AUDIT_FILTER_MASK) != AUDIT_FILTER_TASK && _audit_syscalladded != 1) {
+				audit_rule_syscallbyname_data(rule_new, "all");
+			}
+	
+			rule_new->flags  = add != AUDIT_FILTER_UNSET ? add : del;
+			rule_new->action = action;
+
+			print_rule(v_out, rule_new);
+			lineno++;
+			continue;
+		}
+
 		/* handle reply or send rule */
 		if (rc != -3) {
 			if (handle_request(rc) == -1) {
@@ -1456,6 +1473,22 @@ static int is_ready(void)
 	return 1;
 }
 
+static int translate_rules(char *in, char *out) {
+	translate = 1;
+	v_out = fopen(out, "w");
+	if (!v_out)  {
+		audit_msg(LOG_ERR, "Error opening %s (%s)", out, strerror(errno));
+		return 1;
+	}
+	if (fileopt(in) != 0) {
+		fclose(v_out);
+		free(rule_new);
+		return 1;
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int retval = 1;
@@ -1476,6 +1509,10 @@ int main(int argc, char *argv[])
 		return 4;
 	}
 #endif
+	if (argc == 5 && strcmp(argv[1], "--translate") == 0 && strcmp(argv[3], "--output") == 0) {
+		return translate_rules(argv[2], argv[4]);
+	}
+
 	/* Check where the rules are coming from: commandline or file */
 	if ((argc == 3) && (strcmp(argv[1], "-R") == 0)) {
 		// If reading a file, its most likely start up. Send problems

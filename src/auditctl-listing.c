@@ -113,32 +113,32 @@ static int is_watch(const struct audit_rule_data *r)
 	return 0;
 }
 
-static int print_arch(unsigned int value, int op)
+static int print_arch(FILE *out, unsigned int value, int op)
 {
 	int machine;
 	_audit_elf = value;
 	machine = audit_elf_to_machine(_audit_elf);
 	if (machine < 0)
-		printf(" -F arch%s0x%X", audit_operator_to_symbol(op),
+		fprintf(out, " -F arch%s0x%X", audit_operator_to_symbol(op),
 				(unsigned)value);
 	else {
 		if (interpret == 0) {
 			if (__AUDIT_ARCH_64BIT & _audit_elf)
-				printf(" -F arch%sb64",
+				fprintf(out, " -F arch%sb64",
 						audit_operator_to_symbol(op));
 			else
-				printf(" -F arch%sb32",
+				fprintf(out, " -F arch%sb32",
 						audit_operator_to_symbol(op));
 		} else {
 			const char *ptr = audit_machine_to_name(machine);
-			printf(" -F arch%s%s", audit_operator_to_symbol(op),
+			fprintf(out, " -F arch%s%s", audit_operator_to_symbol(op),
 						ptr);
 		}
 	}
 	return machine;
 }
 
-static int print_syscall(const struct audit_rule_data *r, unsigned int *sc)
+static int print_syscall(FILE *out, const struct audit_rule_data *r, unsigned int *sc)
 {
 	int count = 0;
 	int all = 1;
@@ -167,7 +167,7 @@ static int print_syscall(const struct audit_rule_data *r, unsigned int *sc)
 	}
 
 	if (all) {
-		printf(" -S all");
+		fprintf(out, " -S all");
 		count = i;
 	} else if (io_uring) {
 		for (i = 0; i < IORING_OP_LAST; i++) {
@@ -176,11 +176,11 @@ static int print_syscall(const struct audit_rule_data *r, unsigned int *sc)
 			if (r->mask[word] & bit) {
 				const char *ptr = audit_uringop_to_name(i);
 				if (!count)
-					printf(" -S ");
+					fprintf(out, " -S ");
 				if (ptr)
-					printf("%s%s", !count ? "" : ",", ptr);
+					fprintf(out, "%s%s", !count ? "" : ",", ptr);
 				else
-					printf("%s%u", !count ? "" : ",", i);
+					fprintf(out, "%s%u", !count ? "" : ",", i);
 				count++;
 				*sc = i;
 			}
@@ -198,11 +198,11 @@ static int print_syscall(const struct audit_rule_data *r, unsigned int *sc)
 				else
 					ptr = audit_syscall_to_name(i, machine);
 				if (!count)
-					printf(" -S ");
+					fprintf(out, " -S ");
 				if (ptr)
-					printf("%s%s", !count ? "" : ",", ptr);
+					fprintf(out, "%s%s", !count ? "" : ",", ptr);
 				else
-					printf("%s%u", !count ? "" : ",", i);
+					fprintf(out, "%s%u", !count ? "" : ",", i);
 				count++;
 				*sc = i;
 			}
@@ -211,108 +211,108 @@ static int print_syscall(const struct audit_rule_data *r, unsigned int *sc)
 	return count;
 }
 
-static void print_field_cmp(int value, int op)
+static void print_field_cmp(FILE *out, int value, int op)
 {
 	switch (value)
 	{
 		case AUDIT_COMPARE_UID_TO_OBJ_UID:
-			printf(" -C uid%sobj_uid",
+			fprintf(out, " -C uid%sobj_uid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_GID_TO_OBJ_GID:
-			printf(" -C gid%sobj_gid",
+			fprintf(out, " -C gid%sobj_gid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_EUID_TO_OBJ_UID:
-			printf(" -C euid%sobj_uid",
+			fprintf(out, " -C euid%sobj_uid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_EGID_TO_OBJ_GID:
-			printf(" -C egid%sobj_gid",
+			fprintf(out, " -C egid%sobj_gid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_AUID_TO_OBJ_UID:
-			printf(" -C auid%sobj_uid",
+			fprintf(out, " -C auid%sobj_uid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_SUID_TO_OBJ_UID:
-			printf(" -C suid%sobj_uid",
+			fprintf(out, " -C suid%sobj_uid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_SGID_TO_OBJ_GID:
-			printf(" -C sgid%sobj_gid",
+			fprintf(out, " -C sgid%sobj_gid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_FSUID_TO_OBJ_UID:
-			printf(" -C fsuid%sobj_uid",
+			fprintf(out, " -C fsuid%sobj_uid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_FSGID_TO_OBJ_GID:
-			printf(" -C fsgid%sobj_gid",
+			fprintf(out, " -C fsgid%sobj_gid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_UID_TO_AUID:
-			printf(" -C uid%sauid",
+			fprintf(out, " -C uid%sauid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_UID_TO_EUID:
-			printf(" -C uid%seuid",
+			fprintf(out, " -C uid%seuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_UID_TO_FSUID:
-			printf(" -C uid%sfsuid",
+			fprintf(out, " -C uid%sfsuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_UID_TO_SUID:
-			printf(" -C uid%ssuid",
+			fprintf(out, " -C uid%ssuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_AUID_TO_FSUID:
-			printf(" -C auid%sfsuid",
+			fprintf(out, " -C auid%sfsuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_AUID_TO_SUID:
-			printf(" -C auid%ssuid",
+			fprintf(out, " -C auid%ssuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_AUID_TO_EUID:
-			printf(" -C auid%seuid",
+			fprintf(out, " -C auid%seuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_EUID_TO_SUID:
-			printf(" -C euid%ssuid",
+			fprintf(out, " -C euid%ssuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_EUID_TO_FSUID:
-			printf(" -C euid%sfsuid",
+			fprintf(out, " -C euid%sfsuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_SUID_TO_FSUID:
-			printf(" -C suid%sfsuid",
+			fprintf(out, " -C suid%sfsuid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_GID_TO_EGID:
-			printf(" -C gid%segid",
+			fprintf(out, " -C gid%segid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_GID_TO_FSGID:
-			printf(" -C gid%sfsgid",
+			fprintf(out, " -C gid%sfsgid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_GID_TO_SGID:
-			printf(" -C gid%ssgid",
+			fprintf(out, " -C gid%ssgid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_EGID_TO_FSGID:
-			printf(" -C egid%sfsgid",
+			fprintf(out, " -C egid%sfsgid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_EGID_TO_SGID:
-			printf(" -C egid%ssgid",
+			fprintf(out, " -C egid%ssgid",
 				audit_operator_to_symbol(op));
 			break;
 		case AUDIT_COMPARE_SGID_TO_FSGID:
-			printf(" -C sgid%sfsgid",
+			fprintf(out, " -C sgid%sfsgid",
 				audit_operator_to_symbol(op));
 			break;
 	}
@@ -321,7 +321,7 @@ static void print_field_cmp(int value, int op)
 /*
  *  This function prints 1 rule from the kernel reply
  */
-static void print_rule(const struct audit_rule_data *r)
+void print_rule(FILE *out, const struct audit_rule_data *r)
 {
 	unsigned int i, count = 0, sc = 0;
 	size_t boffset = 0;
@@ -329,7 +329,7 @@ static void print_rule(const struct audit_rule_data *r)
 	unsigned long long a0 = 0, a1 = 0;
 
 	if (!watch) { /* This is syscall auditing */
-		printf("-a %s,%s",
+		fprintf(out, "-a %s,%s",
 			audit_action_to_name((int)r->action),
 				audit_flag_to_name(r->flags));
 
@@ -338,11 +338,11 @@ static void print_rule(const struct audit_rule_data *r)
 			int field = r->fields[i] & ~AUDIT_OPERATORS;
 			if (field == AUDIT_ARCH) {
 				int op = r->fieldflags[i] & AUDIT_OPERATORS;
-				mach = print_arch(r->values[i], op);
+				mach = print_arch(out, r->values[i], op);
 			}
 		}
 		// And last do the syscalls
-		count = print_syscall(r, &sc);
+		count = print_syscall(out, r, &sc);
 	}
 
 	// Now iterate over the fields
@@ -360,44 +360,44 @@ static void print_rule(const struct audit_rule_data *r)
 			// in a meaningful way.
 			if (field == AUDIT_MSGTYPE) {
 				if (!audit_msg_type_to_name(r->values[i]))
-					printf(" -F %s%s%d", name,
+					fprintf(out, " -F %s%s%d", name,
 						audit_operator_to_symbol(op),
 						r->values[i]);
 				else
-					printf(" -F %s%s%s", name,
+					fprintf(out, " -F %s%s%s", name,
 						audit_operator_to_symbol(op),
 						audit_msg_type_to_name(
 						r->values[i]));
 			} else if ((field >= AUDIT_SUBJ_USER &&
 						field <= AUDIT_OBJ_LEV_HIGH)
 						&& field != AUDIT_PPID) {
-				printf(" -F %s%s%.*s", name,
+				fprintf(out, " -F %s%s%.*s", name,
 						audit_operator_to_symbol(op),
 						r->values[i], &r->buf[boffset]);
 				boffset += r->values[i];
 			} else if (field == AUDIT_WATCH) {
 				if (watch)
-					printf("-w %.*s", r->values[i],
+					fprintf(out, "-w %.*s", r->values[i],
 						&r->buf[boffset]);
 				else
-					printf(" -F path%s%.*s",
+					fprintf(out, " -F path%s%.*s",
 						audit_operator_to_symbol(op),
 						r->values[i],
 						&r->buf[boffset]);
 				boffset += r->values[i];
 			} else if (field == AUDIT_DIR) {
 				if (watch)
-					printf("-w %.*s", r->values[i],
+					fprintf(out, "-w %.*s", r->values[i],
 						&r->buf[boffset]);
 				else
-					printf(" -F dir%s%.*s",
+					fprintf(out, " -F dir%s%.*s",
 						audit_operator_to_symbol(op),
 						r->values[i],
 						&r->buf[boffset]);
 
 				boffset += r->values[i];
 			} else if (field == AUDIT_EXE) {
-				printf(" -F exe%s%.*s",
+				fprintf(out, " -F exe%s%.*s",
 					audit_operator_to_symbol(op),
 					r->values[i], &r->buf[boffset]);
 				boffset += r->values[i];
@@ -410,9 +410,9 @@ static void print_rule(const struct audit_rule_data *r)
 				ptr = strtok_r(rkey, key_sep, &saved);
 				while (ptr) {
 					if (watch)
-						printf(" -k %s", ptr);
+						fprintf(out, " -k %s", ptr);
 					else
-						printf(" -F key=%s", ptr);
+						fprintf(out, " -F key=%s", ptr);
 					ptr = strtok_r(NULL, key_sep, &saved);
 				}
 				free(rkey);
@@ -429,16 +429,16 @@ static void print_rule(const struct audit_rule_data *r)
 				if (val & AUDIT_PERM_ATTR)
 					strcat(perms, "a");
 				if (watch)
-					printf(" -p %s", perms);
+					fprintf(out, " -p %s", perms);
 				else
-					printf(" -F perm=%s", perms);
+					fprintf(out, " -F perm=%s", perms);
 			} else if (field == AUDIT_INODE) {
 				// This is unsigned
-				printf(" -F %s%s%u", name,
+				fprintf(out, " -F %s%s%u", name,
 						audit_operator_to_symbol(op),
 						r->values[i]);
 			} else if (field == AUDIT_FIELD_COMPARE) {
-				print_field_cmp(r->values[i], op);
+				print_field_cmp(out, r->values[i], op);
 			} else if (field >= AUDIT_ARG0 && field <= AUDIT_ARG3){
 				if (field == AUDIT_ARG0)
 					a0 = r->values[i];
@@ -447,11 +447,11 @@ static void print_rule(const struct audit_rule_data *r)
 
 				// Show these as hex
 				if (count > 1 || interpret == 0)
-					printf(" -F %s%s0x%X", name,
+					fprintf(out, " -F %s%s0x%X", name,
 						audit_operator_to_symbol(op),
 						r->values[i]);
 				else {	// Use ignore to mean interpret
-					const char *out;
+					const char *tmp;
 					idata id;
 					char val[32];
 					int type;
@@ -466,59 +466,59 @@ static void print_rule(const struct audit_rule_data *r)
 					id.val = val;
 					type = auparse_interp_adjust_type(
 						AUDIT_SYSCALL, name, val);
-					out = auparse_do_interpretation(type,
+					tmp = auparse_do_interpretation(type,
 							&id,
 							AUPARSE_ESC_TTY);
-					printf(" -F %s%s%s", name,
+					fprintf(out, " -F %s%s%s", name,
 						audit_operator_to_symbol(op),
-								out);
-					free((void *)out);
+								tmp);
+					free((void *)tmp);
 				}
 			} else if (field == AUDIT_EXIT) {
 				int e = abs((int)r->values[i]);
 				const char *err = audit_errno_to_name(e);
 
 				if (((int)r->values[i] < 0) && err)
-					printf(" -F %s%s-%s", name,
+					fprintf(out, " -F %s%s-%s", name,
 						audit_operator_to_symbol(op),
 						err);
 				else
-					printf(" -F %s%s%d", name,
+					fprintf(out, " -F %s%s%d", name,
 						audit_operator_to_symbol(op),
 						(int)r->values[i]);
 			} else if (field == AUDIT_FSTYPE) {
 				if (!audit_fstype_to_name(r->values[i]))
-					printf(" -F %s%s%d", name,
+					fprintf(out, " -F %s%s%d", name,
 						audit_operator_to_symbol(op),
 						r->values[i]);
 				else
-					printf(" -F %s%s%s", name,
+					fprintf(out, " -F %s%s%s", name,
 						audit_operator_to_symbol(op),
 						audit_fstype_to_name(
 						r->values[i]));
 			} else if (field == AUDIT_LOGINUID ||
 				   field == AUDIT_SESSIONID) {
 				if (r->values[i] == -1 && interpret)
-					printf(" -F %s%sunset", name,
+					fprintf(out, " -F %s%sunset", name,
 					       audit_operator_to_symbol(op));
 				else
-					printf(" -F %s%s%d", name,
+					fprintf(out, " -F %s%s%d", name,
 					       audit_operator_to_symbol(op),
 					       r->values[i]);
 			} else {
 				// The default is signed decimal
-				printf(" -F %s%s%d", name,
+				fprintf(out, " -F %s%s%d", name,
 						audit_operator_to_symbol(op),
 						r->values[i]);
 			}
 		} else {
 			 // The field name is unknown
-			printf(" f%d%s%d", r->fields[i],
+			fprintf(out, " f%d%s%d", r->fields[i],
 						audit_operator_to_symbol(op),
 						r->values[i]);
 		}
 	}
-	printf("\n");
+	fprintf(out, "\n");
 }
 
 void audit_print_init(void)
@@ -579,7 +579,7 @@ int audit_print_reply(const struct audit_reply *rep, int fd)
 				list_first(&l);
 				n = l.cur;
 				while (n) {
-					print_rule(n->r);
+					print_rule(stdout, n->r);
 					n = list_next(&l);
 				}
 				list_clear(&l);
