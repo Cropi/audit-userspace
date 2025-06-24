@@ -27,8 +27,108 @@
 #include <string.h>
 #include <errno.h>
 #include <pwd.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
 #include "auparse.h"
-#include "aulastlog-llist.h"
+#include "generic-llist.h"
+
+struct login_rec {
+        time_t sec;
+        uid_t uid;
+        char *name;
+        char *host;
+        char *term;
+};
+
+static void *dup_rec(const void *data, size_t size)
+{
+        const struct login_rec *in = data;
+        struct login_rec *rec = malloc(sizeof(*rec));
+
+        if (rec == NULL)
+                return NULL;
+        rec->sec = in->sec;
+        rec->uid = in->uid;
+        rec->name = strdup(in->name);
+        if (in->host)
+                rec->host = strdup(in->host);
+        else
+                rec->host = NULL;
+        if (in->term)
+                rec->term = strdup(in->term);
+        else
+                rec->term = NULL;
+        return rec;
+}
+
+static void free_rec(void *data)
+{
+        struct login_rec *rec = data;
+
+        free(rec->name);
+        free(rec->host);
+        free(rec->term);
+        free(rec);
+}
+
+static inline unsigned int list_get_cnt(const llist *l)
+{
+        return l->cnt;
+}
+
+static int list_update_login(llist *l, time_t t)
+{
+        struct login_rec *r = list_get_cur(l)->data;
+
+        if (!r)
+                return 0;
+        r->sec = t;
+        return 1;
+}
+
+static int list_update_host(llist *l, const char *h)
+{
+        struct login_rec *r = list_get_cur(l)->data;
+
+        if (!r)
+                return 0;
+        free(r->host);
+        if (h)
+                r->host = strdup(h);
+        else
+                r->host = NULL;
+        return 1;
+}
+
+static int list_update_term(llist *l, const char *t)
+{
+        struct login_rec *r = list_get_cur(l)->data;
+
+        if (!r)
+                return 0;
+        free(r->term);
+        if (t)
+                r->term = strdup(t);
+        else
+                r->term = NULL;
+        return 1;
+}
+
+static lnode *list_find_uid(llist *l, uid_t uid)
+{
+        lnode *node = l->head;
+
+        while (node) {
+                struct login_rec *r = node->data;
+                if (r->uid == uid) {
+                        l->cur = node;
+                        return node;
+                }
+                node = node->next;
+        }
+        return NULL;
+}
 
 static void usage(void)
 {
@@ -66,19 +166,19 @@ int main(int argc, char *argv[])
 
 	// Stuff linked lists with all users
 	// This use is OK because docs say local machine only 
-	while ((p = getpwent()) != NULL) {
-		lnode n;
+       while ((p = getpwent()) != NULL) {
+               struct login_rec n;
 
-		n.sec = 0;
-		n.uid = p->pw_uid;
-		n.name = p->pw_name;
-		n.host = NULL;
-		n.term = NULL;
-		if (user == NULL)
-			list_append(&l, &n);
-		else if (strcmp(user, p->pw_name) == 0)
-			list_append(&l, &n);
-	}
+               n.sec = 0;
+               n.uid = p->pw_uid;
+               n.name = p->pw_name;
+               n.host = NULL;
+               n.term = NULL;
+               if (user == NULL)
+                       list_append(&l, &n, sizeof(n), dup_rec);
+               else if (strcmp(user, p->pw_name) == 0)
+                       list_append(&l, &n, sizeof(n), dup_rec);
+       }
 	endpwent();
 
 	if (user && list_get_cnt(&l) == 0) {
@@ -138,11 +238,11 @@ int main(int argc, char *argv[])
 		"                       Latest\n");
 	list_first(&l);
 	do {
-		char tmp[48];
-		const char *c, *h, *t;
-		lnode *cur = list_get_cur(&l);
-		if (cur->sec == 0)
-			c = "**Never logged in**";
+               char tmp[48];
+               const char *c, *h, *t;
+               struct login_rec *cur = list_get_cur(&l)->data;
+               if (cur->sec == 0)
+                       c = "**Never logged in**";
 		else {
 			struct tm *btm;
 
@@ -159,13 +259,13 @@ int main(int argc, char *argv[])
 		printf("%-16s %-12.12s %-26.26s %s\n", cur->name, t, h, c);
 	} while (list_next(&l));
 	
-	list_clear(&l);
+       list_clear(&l, free_rec);
 	return 0;
 
 error_exit_2:
         auparse_destroy(au);
 error_exit_1:
-	list_clear(&l);
+       list_clear(&l, free_rec);
 	return 1;
 }
 

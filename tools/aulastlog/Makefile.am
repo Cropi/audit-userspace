@@ -23,12 +23,12 @@
 
 CONFIG_CLEAN_FILES = *.loT *.rej *.orig
 EXTRA_DIST = $(man_MANS)
-AM_CPPFLAGS = -I${top_srcdir} -I${top_srcdir}/auparse
+AM_CPPFLAGS = -I${top_srcdir} -I${top_srcdir}/auparse -I${top_srcdir}/src
 AM_CFLAGS = -D_GNU_SOURCE ${WFLAGS}
 bin_PROGRAMS = aulastlog
-noinst_HEADERS = aulastlog-llist.h
+noinst_HEADERS =
 man_MANS = aulastlog.8
 
-aulastlog_SOURCES = aulastlog.c aulastlog-llist.c
+aulastlog_SOURCES = aulastlog.c ${top_srcdir}/src/generic-llist.c
 aulastlog_LDADD = ${top_builddir}/auparse/libauparse.la
 aulastlog_DEPENDENCIES = ${top_builddir}/auparse/libauparse.la
