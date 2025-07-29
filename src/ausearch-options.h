@@ -32,15 +32,20 @@
 
 /* Global variables that describe what search is to be performed */
 extern const char *event_key;
+extern int neg_event_key;
 extern const char *event_subject;
 extern const char *event_object;
+extern int neg_event_subject, neg_event_object;
 extern int event_se;
 extern int just_one;
 extern int line_buffered;
 extern int event_debug;
 extern pid_t event_ppid;
+extern int neg_event_ppid;
 extern uint32_t event_session_id;
+extern int neg_event_session_id;
 extern ilist *event_type;
+extern int neg_event_type;
 
 /* Data type to govern output format */
 extern report_t report_format;

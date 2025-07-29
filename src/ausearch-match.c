@@ -2,7 +2,7 @@
 * ausearch-match.c - Extract interesting fields and check for match
 * Copyright (c) 2005-08, 2011 Red Hat Inc.
 * Copyright (c) 2011 IBM Corp.
-* All Rights Reserved. 
+* All Rights Reserved.
 *
 * This software may be freely redistributed and/or modified under the
 * terms of the GNU General Public License as published by the Free
@@ -16,7 +16,7 @@
 *
 * You should have received a copy of the GNU General Public License
 * along with this program; see the file COPYING. If not, write to the
-* Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor 
+* Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor
 * Boston, MA 02110-1335, USA.
 *
 * Authors:
@@ -63,7 +63,8 @@ int match(llist *l)
 	// Are we within time range?
 	if (start_time == 0 || l->e.sec >= start_time) {
 		if (end_time == 0 || l->e.sec <= end_time) {
-			if (event_id == -1 || event_id == l->e.serial) {
+			if ((neg_event_id && event_id != l->e.serial) ||
+				(!neg_event_id && (event_id == -1 || event_id == l->e.serial))) {
 				// Load interpretations if needed
 				load_interpretations(l);
 
@@ -75,7 +76,7 @@ int match(llist *l)
 				// perform additional tests for the field
 				if (event_node_list) {
 					const snode *sn;
-					int found=0;
+					int found = 0;
 					slist *sptr = event_node_list;
 
 					if (l->e.node == NULL)
@@ -90,39 +91,58 @@ int match(llist *l)
 						else
 							sn=slist_next(sptr);
 					}
-					if (!found)
+					if (neg_event_node) {
+						if (found)
+							return 0;
+					} else if (!found)
 						return 0;
 				}
 				if (user_match(l) == 0)
 					return 0;
 				if (group_match(l) == 0)
 					return 0;
-				if ((event_ppid != -1) &&
-						(event_ppid != l->s.ppid))
-					return 0;
-				if ((event_pid != -1) &&
-						(event_pid != l->s.pid))
-					return 0;
-				if (event_machine != -1 &&
-						(event_machine !=
-					audit_elf_to_machine(l->s.arch)))
-					return 0;
-				if ((event_syscall != -1) &&
-					(event_syscall != l->s.syscall))
+				if (neg_event_ppid) {
+					if (event_ppid == l->s.ppid)
 						return 0;
-				if ((event_session_id != -2) &&
-					(event_session_id != l->s.session_id))
+				} else if ((event_ppid != -1) && (event_ppid != l->s.ppid))
+					return 0;
+				if (neg_event_pid) {
+					if (event_pid == l->s.pid)
+						return 0;
+				} else if ((event_pid != -1) && (event_pid != l->s.pid))
+					return 0;
+				if (neg_event_machine) {
+					if (event_machine == audit_elf_to_machine(l->s.arch))
+						return 0;
+				} else if (event_machine != -1 && (event_machine != audit_elf_to_machine(l->s.arch)))
+					return 0;
+				if (neg_event_syscall) {
+					if (event_syscall == l->s.syscall)
+						return 0;
+				} else if ((event_syscall != -1) && (event_syscall != l->s.syscall))
+					return 0;
+				if (neg_event_session_id) {
+					if (event_session_id == l->s.session_id)
+						return 0;
+				} else if ((event_session_id != -2) && (event_session_id != l->s.session_id))
 					return 0;
 				if (event_exit_is_set) {
 					if (l->s.exit_is_set == 0)
 						return 0;
-					if (event_exit != l->s.exit)
+					if (neg_event_exit) {
+						if (event_exit == l->s.exit)
+							return 0;
+					} else if (event_exit != l->s.exit)
 						return 0;
 				}
 
-				if ((event_success != S_UNSET) &&
-						(event_success != l->s.success))
-					return 0;
+				if (event_success != S_UNSET) {
+					if (neg_event_success) {
+						if (event_success == l->s.success)
+							return 0;
+					} else if (event_success != l->s.success)
+						return 0;
+				}
 				// event_type requires looking at each item
 				if (event_type != NULL) {
 					int found = 0;
@@ -144,7 +164,10 @@ int match(llist *l)
 						if (found)
 							break;
 					} while ((n = list_next(l)));
-					if (!found)
+					if (neg_event_type) {
+						if (found)
+							return 0;
+					} else if (!found)
 						return 0;
 				}
 
@@ -177,36 +200,42 @@ int match(llist *l)
 					if (l->s.cwd && !found) {
 						/* Check cwd, too */
 						if (strmatch(event_filename,
-								l->s.cwd) == 0)
+									 l->s.cwd) == 0)
 							return 0;
 					}
+					if (neg_event_filename && found)
+						return 0;
 				}
 				if (event_hostname) {
 					if (l->s.hostname == NULL)
 						return 0;
-					if (strmatch(event_hostname,
-						l->s.hostname) == 0)
+					if (strmatch(event_hostname, l->s.hostname) == 0)
+						return 0;
+					if (neg_event_hostname)
 						return 0;
 				}
 				if (event_terminal) {
 					if (l->s.terminal == NULL)
 						return 0;
-					if (strmatch(event_terminal,
-						l->s.terminal) == 0)
+					if (strmatch(event_terminal, l->s.terminal) == 0)
+						return 0;
+					if (neg_event_terminal)
 						return 0;
 				}
 				if (event_exe) {
 					if (l->s.exe == NULL)
 						return 0;
-					if (strmatch(event_exe,
-						l->s.exe) == 0)
+					if (strmatch(event_exe, l->s.exe) == 0)
+						return 0;
+					if (neg_event_exe)
 						return 0;
 				}
 				if (event_comm) {
 					if (l->s.comm == NULL)
 						return 0;
-					if (strmatch(event_comm,
-						l->s.comm) == 0)
+					if (strmatch(event_comm, l->s.comm) == 0)
+						return 0;
+					if (neg_event_comm)
 						return 0;
 				}
 				if (event_key) {
@@ -229,7 +258,10 @@ int match(llist *l)
 								break;
 							}
 						} while ((sn=slist_next(sptr)));
-						if (!found)
+						if (neg_event_key) {
+							if (found)
+								return 0;
+						} else if (!found)
 							return 0;
 					}
 				}
@@ -237,14 +269,17 @@ int match(llist *l)
 					if (l->s.vmname == NULL)
 						return 0;
 					if (strmatch(event_vmname,
-							l->s.vmname) == 0)
+								 l->s.vmname) == 0)
+						return 0;
+					if (neg_event_vmname)
 						return 0;
 				}
 				if (event_uuid) {
 					if (l->s.uuid == NULL)
 						return 0;
-					if (strmatch(event_uuid,
-							l->s.uuid) == 0)
+					if (strmatch(event_uuid, l->s.uuid) == 0)
+						return 0;
+					if (neg_event_uuid)
 						return 0;
 				}
 				if (context_match(l) == 0)
@@ -278,7 +313,19 @@ static int strmatch(const char *needle, const char *haystack)
  */
 static int user_match(llist *l)
 {
-	// Match by string if set (assume all event vars are set)
+       if (neg_event_uid && event_uid == l->s.uid)
+               return 0;
+       if (neg_event_euid && event_euid == l->s.euid)
+               return 0;
+       if (neg_event_loginuid && event_loginuid == l->s.loginuid)
+               return 0;
+       if (neg_event_tuid && l->s.tuid && strcmp(event_tuid, l->s.tuid) == 0)
+               return 0;
+       if (neg_event_teuid && l->s.teuid && strcmp(event_teuid, l->s.teuid) == 0)
+               return 0;
+       if (neg_event_tauid && l->s.tauid && strcmp(event_tauid, l->s.tauid) == 0)
+               return 0;
+       // Match by string if set (assume all event vars are set)
 	if (event_ua && event_tuid) {
 		// This will "or" the user tests
 		if (l->s.tuid && strcmp(event_tuid, l->s.tuid) == 0)
@@ -339,7 +386,11 @@ static int user_match(llist *l)
  */
 static int group_match(llist *l)
 {
-	if (event_ga) {
+       if (neg_event_gid && event_gid == l->s.gid)
+               return 0;
+       if (neg_event_egid && event_egid == l->s.egid)
+               return 0;
+       if (event_ga) {
 		// This will "or" the group tests
 		if (event_gid == l->s.gid)
 			return 1;
@@ -362,7 +413,21 @@ static int group_match(llist *l)
  */
 static int context_match(llist *l)
 {
-	if (event_se) { /* This does the "or" check if -se test */
+       if (neg_event_subject && l->s.avc && alist_find_subj(l->s.avc)) {
+               do {
+                       if (strmatch(event_subject,
+                                       l->s.avc->cur->scontext))
+                               return 0;
+               } while(alist_next_subj(l->s.avc));
+       }
+       if (neg_event_object && l->s.avc && alist_find_obj(l->s.avc)) {
+               do {
+                       if (strmatch(event_object,
+                                       l->s.avc->cur->tcontext))
+                               return 0;
+               } while(alist_next_obj(l->s.avc));
+       }
+       if (event_se) { /* This does the "or" check if -se test */
 		if (event_subject) {
 			if (l->s.avc && alist_find_subj(l->s.avc)) {
 				do {

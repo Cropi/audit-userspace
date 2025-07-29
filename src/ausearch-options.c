@@ -44,42 +44,62 @@ char *user_file = NULL;
 int force_logs = 0;
 const char *checkpt_filename = NULL;	/* checkpoint filename if present */
 report_t report_format = RPT_DEFAULT;
+static int negate_next = 0;
 
 
 /* Global vars that will be accessed by the match model */
 unsigned int event_id = -1;
+int neg_event_id = 0;
 gid_t event_gid = -1, event_egid = -1;
+int neg_event_gid = 0, neg_event_egid = 0;
 ilist *event_type = NULL;
+int neg_event_type = 0;
 pid_t event_pid = -1, event_ppid = -1;
+int neg_event_pid = 0, neg_event_ppid = 0;
 success_t event_success = S_UNSET;
 auparse_esc_t escape_mode = AUPARSE_ESC_TTY;
 int event_exact_match = 0;
 uid_t event_uid = -1, event_euid = -1, event_loginuid = -2;
+int neg_event_uid = 0, neg_event_euid = 0, neg_event_loginuid = 0;
 const char *event_tuid = NULL, *event_teuid = NULL, *event_tauid = NULL;
+int neg_event_tuid = 0, neg_event_teuid = 0, neg_event_tauid = 0;
 int event_syscall = -1, event_machine = -1;
+int neg_event_syscall = 0, neg_event_machine = 0;
 int event_ua = 0, event_ga = 0, event_se = 0;
 int just_one = 0;
 uint32_t event_session_id = -2;
+int neg_event_session_id = 0;
 long long event_exit = 0;
 int event_exit_is_set = 0;
+int neg_event_exit = 0;
+int neg_event_success = 0;
 int line_buffered = 0;
 int event_debug = 0;
 int checkpt_timeonly = 0;
 int extra_keys = 0, extra_labels = 0, extra_obj2 = 0, extra_time = 0;
 const char *event_key = NULL;
+int neg_event_key = 0;
 const char *event_filename = NULL;
+int neg_event_filename = 0;
 const char *event_exe = NULL;
+int neg_event_exe = 0;
 const char *event_comm = NULL;
+int neg_event_comm = 0;
 const char *event_hostname = NULL;
+int neg_event_hostname = 0;
 const char *event_terminal = NULL;
+int neg_event_terminal = 0;
 const char *event_subject = NULL;
 const char *event_object = NULL;
+int neg_event_subject = 0, neg_event_object = 0;
 const char *event_uuid = NULL;
+int neg_event_uuid = 0;
 const char *event_vmname = NULL;
-ilist *event_type;
+int neg_event_vmname = 0;
 time_t arg_eoe_timeout = (time_t)0;
 
 slist *event_node_list = NULL;
+int neg_event_node = 0;
 
 struct nv_pair {
     int        value;
@@ -93,7 +113,8 @@ S_TIME_END, S_TIME_START, S_TERMINAL, S_ALL_UID, S_EFF_UID, S_UID, S_LOGINID,
 S_VERSION, S_EXACT_MATCH, S_EXECUTABLE, S_CONTEXT, S_SUBJECT, S_OBJECT,
 S_PPID, S_KEY, S_RAW, S_NODE, S_IN_LOGS, S_JUST_ONE, S_SESSION, S_EXIT,
 S_LINEBUFFERED, S_UUID, S_VMNAME, S_DEBUG, S_CHECKPOINT, S_ARCH, S_FORMAT,
-S_EXTRA_TIME, S_EXTRA_LABELS, S_EXTRA_KEYS, S_EXTRA_OBJ2, S_ESCAPE, S_EOE_TMO };
+S_EXTRA_TIME, S_EXTRA_LABELS, S_EXTRA_KEYS, S_EXTRA_OBJ2, S_ESCAPE, S_EOE_TMO,
+S_NEGATE };
 
 static const struct nv_pair optiontab[] = {
 	{ S_EVENT, "-a" },
@@ -155,8 +176,8 @@ static const struct nv_pair optiontab[] = {
 	{ S_SUBJECT, "--subject" },
 	{ S_OSUCCESS, "-sv" },
 	{ S_OSUCCESS, "--success" },
-	{ S_TIME_END, "-te"},
-	{ S_TIME_END, "--end"},
+	{ S_TIME_END, "-te" },
+	{ S_TIME_END, "--end" },
 	{ S_TIME_START, "-ts" },
 	{ S_TIME_START, "--start" },
 	{ S_TERMINAL, "-tm" },
@@ -178,7 +199,8 @@ static const struct nv_pair optiontab[] = {
 	{ S_EXACT_MATCH, "-w" },
 	{ S_EXACT_MATCH, "--word" },
 	{ S_EXECUTABLE, "-x" },
-	{ S_EXECUTABLE, "--executable" }
+	{ S_EXECUTABLE, "--executable" },
+	{ S_NEGATE, "--negate" }
 };
 #define OPTION_NAMES (sizeof(optiontab)/sizeof(optiontab[0]))
 
@@ -221,6 +243,7 @@ static void usage(void)
 	"\t--just-one\t\t\tEmit just one event\n"
 	"\t-k,--key  <key string>\t\tsearch based on key field\n"
 	"\t-l, --line-buffered\t\tFlush output on every line\n"
+	"\t--negate\t\t\tnegate the next search criterion\n"
 	"\t-m,--message  <Message type>\tsearch based on message type\n"
 	"\t-n,--node  <Node name>\t\tsearch based on machine's name\n"
 	"\t-o,--object  <SE Linux Object context> search based on context of object\n"
@@ -327,6 +350,16 @@ int check_params(int count, char *vars[])
 			optarg = NULL;
 
 		switch (audit_lookup_option(vars[c])) {
+		case S_NEGATE:
+			if (optarg) {
+				fprintf(stderr,
+					"Argument is NOT required for %s\n",
+					vars[c]);
+				retval = -1;
+			} else {
+				negate_next = 1;
+			}
+			break;
 		case S_EVENT:
 			if (!optarg) {
 				fprintf(stderr,
@@ -340,10 +373,14 @@ int check_params(int count, char *vars[])
 				event_id = strtoul(optarg, NULL, 10);
 				if (errno) {
 					fprintf(stderr,
-					"Illegal value for audit event ID");
+						"Illegal value for audit event ID");
 					retval = -1;
 				}
 				c++;
+				if (negate_next) {
+					neg_event_id = 1;
+					negate_next = 0;
+				}
 			} else {
 				fprintf(stderr,
 			"Audit event id must be a numeric value, was %s\n",
@@ -416,9 +453,13 @@ int check_params(int count, char *vars[])
 				break;
 			} else {
 				event_comm = strdup(optarg);
-		                if (event_comm == NULL)
+				if (event_comm == NULL)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_comm = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_FILENAME:
@@ -440,6 +481,10 @@ int check_params(int count, char *vars[])
 				if (event_filename == NULL)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_filename = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_KEY:
@@ -453,6 +498,10 @@ int check_params(int count, char *vars[])
 				if (event_key == NULL)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_key = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_ALL_GID:
@@ -488,6 +537,11 @@ int check_params(int count, char *vars[])
 			event_egid = event_gid;
 			event_ga = 1;
 			c++;
+			if (negate_next) {
+				neg_event_gid = 1;
+				neg_event_egid = 1;
+				negate_next = 0;
+			}
 			break;
 		case S_EFF_GID:
 			if (!optarg) {
@@ -520,6 +574,10 @@ int check_params(int count, char *vars[])
 				event_egid = gr->gr_gid;
 			}
 			c++;
+			if (negate_next) {
+				neg_event_egid = 1;
+				negate_next = 0;
+			}
 			break;
 		case S_GID:
 			if (!optarg) {
@@ -552,6 +610,10 @@ int check_params(int count, char *vars[])
 				event_gid = gr->gr_gid;
 			}
 			c++;
+			if (negate_next) {
+				neg_event_gid = 1;
+				negate_next = 0;
+			}
 			break;
 		case S_HELP:
 			usage();
@@ -568,6 +630,10 @@ int check_params(int count, char *vars[])
 				if (event_hostname == NULL)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_hostname = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_INTERP:
@@ -607,16 +673,20 @@ int check_params(int count, char *vars[])
 			}
 			break;
 		case S_MESSAGE_TYPE:
-	                if (!optarg) {
+			if (!optarg) {
 				fprintf(stderr,
 					"Argument is required for %s\n",
 					vars[c]);
 				retval = -1;
-	                } else {
+			} else {
 				if (strcasecmp(optarg, "ALL") != 0) {
 					retval = parse_msg(optarg);
 				}
 				c++;
+				if (negate_next) {
+					neg_event_type = 1;
+					negate_next = 0;
+				}
 			}
 			if (retval < 0) {
 				int i;
@@ -645,6 +715,10 @@ int check_params(int count, char *vars[])
 				if (event_object == NULL)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_object = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_PPID:
@@ -661,6 +735,10 @@ int check_params(int count, char *vars[])
 				if (errno)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_ppid = 1;
+					negate_next = 0;
+				}
 			} else {
 				fprintf(stderr,
 			"Parent process id must be a numeric value, was %s\n",
@@ -682,6 +760,10 @@ int check_params(int count, char *vars[])
 				if (errno)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_pid = 1;
+					negate_next = 0;
+				}
 			} else {
 				fprintf(stderr,
 				"Process id must be a numeric value, was %s\n",
@@ -782,8 +864,12 @@ int check_params(int count, char *vars[])
 
 				sn.str = strdup(optarg);
 				sn.key = NULL;
-				sn.hits=0;
+				sn.hits = 0;
 				slist_append(event_node_list, &sn);
+				if (negate_next) {
+					neg_event_node = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_SYSCALL:
@@ -799,8 +885,9 @@ int check_params(int count, char *vars[])
 				event_syscall = (int)strtoul(optarg, NULL, 10);
 				if (errno) {
 					fprintf(stderr,
-			"Syscall numeric conversion error (%s) for %s\n",
-						strerror(errno), optarg);
+						"Syscall numeric conversion error (%s) for %s\n",
+						strerror(errno),
+						optarg);
 					retval = -1;
 				}
 			} else {
@@ -823,8 +910,12 @@ int check_params(int count, char *vars[])
 						optarg);
                                         retval = -1;
 				}
-                        }
+			}
 			c++;
+			if (negate_next) {
+				neg_event_syscall = 1;
+				negate_next = 0;
+			}
 			break;
 		case S_CONTEXT:
 			if (!optarg) {
@@ -842,6 +933,11 @@ int check_params(int count, char *vars[])
 					retval = -1;
 				event_se = 1;
 				c++;
+				if (negate_next) {
+					neg_event_subject = 1;
+					neg_event_object = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_SUBJECT:
@@ -856,6 +952,10 @@ int check_params(int count, char *vars[])
 				if (event_subject == NULL)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_subject = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_OSUCCESS:
@@ -900,8 +1000,12 @@ int check_params(int count, char *vars[])
 					retval = -1;
 				event_session_id = optval;
 				c++;
-                        } else if (len >= 2 && *(optarg)=='-' &&
-                                                (isdigit((unsigned char)optarg[1]))) {
+				if (negate_next) {
+					neg_event_session_id = 1;
+					negate_next = 0;
+				}
+			} else if (len >= 2 && *(optarg) == '-' &&
+					   (isdigit((unsigned char)optarg[1]))) {
 				errno = 0;
 				long optval = strtol(optarg, NULL, 0);
 				if (errno || optval < INT_MIN || optval > INT_MAX) {
@@ -911,6 +1015,10 @@ int check_params(int count, char *vars[])
 				}
 				event_session_id = optval;
 				c++;
+				if (negate_next) {
+					neg_event_session_id = 1;
+					negate_next = 0;
+				}
 			} else {
 				fprintf(stderr,
 				"Session id must be a numeric value, was %s\n",
@@ -921,8 +1029,8 @@ int check_params(int count, char *vars[])
 			break;
 		case S_EXIT:
 			if (!optarg) {
-				if ((c+1 < count) && vars[c+1])
-					optarg = vars[c+1];
+				if ((c + 1 < count) && vars[c + 1])
+					optarg = vars[c + 1];
 				else {
 					fprintf(stderr,
 						"Argument is required for %s\n",
@@ -933,49 +1041,49 @@ int check_params(int count, char *vars[])
 			}
 			{
 			size_t len = strlen(optarg);
-                        if (isdigit((unsigned char)optarg[0])) {
+			if (isdigit((unsigned char)optarg[0])) {
 				errno = 0;
-                                event_exit = strtoll(optarg, NULL, 0);
+				event_exit = strtoll(optarg, NULL, 0);
 				if (errno) {
 					retval = -1;
-					fprintf(stderr, "Error converting %s\n",
-						optarg);
+					fprintf(stderr, "Error converting %s\n", optarg);
 				}
-                        } else if (len >= 2 && *(optarg)=='-' &&
-                                                (isdigit((unsigned char)optarg[1]))) {
+			} else if (len >= 2 && *(optarg) == '-' &&
+						(isdigit((unsigned char)optarg[1]))) {
 				errno = 0;
-                                event_exit = strtoll(optarg, NULL, 0);
+				event_exit = strtoll(optarg, NULL, 0);
 				if (errno) {
 					retval = -1;
-					fprintf(stderr, "Error converting %s\n",
-						optarg);
+					fprintf(stderr, "Error converting %s\n", optarg);
 				}
-                        } else {
-                                event_exit = audit_name_to_errno(optarg);
-                                if (event_exit == 0) {
+			} else {
+				event_exit = audit_name_to_errno(optarg);
+				if (event_exit == 0) {
 					retval = -1;
 					fprintf(stderr,
-						"Unknown errno, was %s\n",
-						optarg);
+							"Unknown errno, was %s\n",
+							optarg);
 				}
-                        }
+			}
 			c++;
+			if (negate_next) {
+				neg_event_exit = 1;
+				negate_next = 0;
+			}
 			if (retval != -1)
 				event_exit_is_set = 1;
 			}
 			break;
 		case S_TIME_END:
 			if (optarg) {
-				if ( (c+2 < count) && vars[c+2] &&
-					(vars[c+2][0] != '-') ) {
-				/* Have both date and time - check order*/
+				if ((c + 2 < count) && vars[c + 2] &&
+					(vars[c + 2][0] != '-')) {
+					/* Have both date and time - check order*/
 					if (strchr(optarg, ':')) {
-						if (ausearch_time_end(vars[c+2],
-								 optarg) != 0)
+						if (ausearch_time_end(vars[c + 2], optarg) != 0)
 							retval = -1;
 					} else {
-						if (ausearch_time_end(optarg,
-								vars[c+2]) != 0)
+						if (ausearch_time_end(optarg, vars[c + 2]) != 0)
 							retval = -1;
 					}
 					c++;
@@ -983,22 +1091,23 @@ int check_params(int count, char *vars[])
 					// Check against recognized words
 					int t = lookup_time(optarg);
 					if (t >= 0) {
-						if (ausearch_time_end(optarg,
-							"00:00:00") != 0)
+						if (ausearch_time_end(optarg, "00:00:00") != 0)
 							retval = -1;
-					} else if ( (strchr(optarg, ':')) == NULL) {
+					} else if ((strchr(optarg, ':')) == NULL) {
 						/* Only have date */
-						if (ausearch_time_end(optarg,
-								NULL) != 0)
+						if (ausearch_time_end(optarg, NULL) != 0)
 							retval = -1;
 					} else {
 						/* Only have time */
-						if (ausearch_time_end(NULL,
-								optarg) != 0)
+						if (ausearch_time_end(NULL, optarg) != 0)
 							retval = -1;
 					}
 				}
 				c++;
+				if (negate_next) {
+					neg_event_loginuid = 1;
+					negate_next = 0;
+				}
 				break;
 			}
 			fprintf(stderr,
@@ -1064,6 +1173,10 @@ int check_params(int count, char *vars[])
 				if (event_terminal == NULL)
 					retval = -1;
 				c++;
+				if (negate_next) {
+					neg_event_terminal = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_UID:
@@ -1098,6 +1211,10 @@ int check_params(int count, char *vars[])
 				event_tuid = strdup(optarg);
 			}
 			c++;
+			if (negate_next) {
+				neg_event_uid = 1;
+				negate_next = 0;
+			}
 			break;
 		case S_EFF_UID:
 			if (!optarg) {
@@ -1131,6 +1248,10 @@ int check_params(int count, char *vars[])
 				event_teuid = strdup(optarg);
 			}
 			c++;
+			if (negate_next) {
+				neg_event_euid = 1;
+				negate_next = 0;
+			}
 			break;
 		case S_ALL_UID:
 			if (!optarg) {
@@ -1169,6 +1290,12 @@ int check_params(int count, char *vars[])
 			event_euid = event_uid;
 			event_loginuid = event_uid;
 			c++;
+			if (negate_next) {
+				neg_event_uid = 1;
+				neg_event_euid = 1;
+				neg_event_loginuid = 1;
+				negate_next = 0;
+			}
 			break;
 		case S_LOGINID:
 			if (!optarg) {
@@ -1231,6 +1358,10 @@ int check_params(int count, char *vars[])
 					retval = -1;
 				}
 				c++;
+				if (negate_next) {
+					neg_event_uuid = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_VMNAME:
@@ -1240,15 +1371,19 @@ int check_params(int count, char *vars[])
 					vars[c]);
 				retval = -1;
 			} else {
-				event_vmname= strdup(optarg);
+				event_vmname = strdup(optarg);
 				if (event_vmname == NULL) {
 					retval = -1;
 				}
 				c++;
+				if (negate_next) {
+					neg_event_vmname = 1;
+					negate_next = 0;
+				}
 			}
 			break;
 		case S_VERSION:
-	                printf("ausearch version %s\n", VERSION);
+			printf("ausearch version %s\n", VERSION);
 			exit(0);
 			break;
 		case S_EXACT_MATCH:
@@ -1267,12 +1402,16 @@ int check_params(int count, char *vars[])
 					vars[c]);
 				retval = -1;
 			} else {
-				event_exe = strdup(optarg);
-				if (event_exe == NULL)
-				        retval = -1;
-				c++;
-			}
-			break;
+                               event_exe = strdup(optarg);
+                               if (event_exe == NULL)
+                                       retval = -1;
+                               c++;
+                               if (negate_next) {
+                                       neg_event_exe = 1;
+                                       negate_next = 0;
+                               }
+                       }
+                       break;
 		case S_LINEBUFFERED:
 			line_buffered = 1;
 			break;
@@ -1316,10 +1455,14 @@ int check_params(int count, char *vars[])
 						optarg);
 					retval = -1;
 				}
-				event_machine = machine;
-			}
-			c++;
-			break;
+                               event_machine = machine;
+                       }
+                       c++;
+                       if (negate_next) {
+                               neg_event_machine = 1;
+                               negate_next = 0;
+                       }
+                       break;
 		default:
 			fprintf(stderr, "%s is an unsupported option\n",
 				vars[c]);
