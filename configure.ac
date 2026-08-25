@@ -188,7 +188,7 @@ AC_SUBST(use_python3)
 
 if test "x$use_python3" = "xyes" ; then
 	AC_CHECK_PROG([SWIG],[swig],[swig], [no])
-	AS_IF([test x"$SWIG" == x"no"], [AC_MSG_ERROR([Please install swig before configuring (required by python/python3).])])
+	AS_VAR_IF([SWIG], [no], [AC_MSG_ERROR([Please install swig before configuring (required by python/python3).])])
 fi
 
 withval=""
